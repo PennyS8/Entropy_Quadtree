@@ -35,16 +35,16 @@ def complexity_to_color(complexity:float, alpha:int=100) -> tuple:
     
     if t < 0.25:
         s = t / 0.25
-        r, g, b = int(0 + s * 0),   int(0 + s * 128),   int(200 + s * 55)
+        r, g, b = 0, int(s * 128), int(200 + s * 55)
     elif t < 0.5:
         s = (t - 0.25) / 0.25
-        r, g, b = int(0 + s * 0),   int(128 + s * 127), int(255 - s * 255)
+        r, g, b = 0, int(128 + s * 127), int(255 - s * 255)
     elif t < 0.75:
         s = (t - 0.5) / 0.25
-        r, g, b = int(0 + s * 255), int(255 - s * 128), int(0)
+        r, g, b = int(s * 255), int(255 - s * 128), 0
     else:
         s = (t - 0.75) / 0.25
-        r, g, b = 255,              int(127 - s * 127), int(0)
+        r, g, b = 255, int(127 - s * 127), 0
     
     return (r, g, b, alpha)
 
@@ -54,32 +54,53 @@ def complexity_to_color(complexity:float, alpha:int=100) -> tuple:
 def render_overlay(
     image: np.ndarray,
     root: QuadNode,
+    alpha: np.ndarray = None,
     fill_alpha: int = 120,
     border_color: tuple = (255, 255, 255),
     border_width: int = 1,
-    show_borders: bool = True
+    show_borders: bool = True,
+    bg_threshold: float = 0.5
 ) -> Image.Image:
     """
     Render the quadtree complexity overlay on top of the original image.
-
+    
+    Subject nodes are colored by complexity score.
+    Background nodes (background_ratio >= bg_threshold) are skipped entirely
+    (no fill, no outline) so transparent regions appear as the original
+    composited image without any heatmap overlay.
+    
     Args:
-        image: numpy array (H, W, C) uint8, RGB
-        root: root QuadNode from QuadTree.build()
-        fill_alpha: opacity of the complexity color filll (0-255)
-        border_color: RGBA color for quadrant borders
-        border_width: pixel width of borders
-        show_borders: whether to draw borders lines between quadrants
+        image:          numpy array (H, W, C) uint8, RGB
+        root:           root QuadNode from QuadTree.build()
+        fill_alpha:     opacity of the complexity color filll (0-255)
+        border_color:   RGBA color for quadrant borders
+        border_width:   pixel width of borders
+        show_borders:   whether to draw borders lines between quadrants
+        bg_threshold:   nodes with background_ratio >= this are skipped
 
     Returns:
         PIL image in RGBA mode with overlay applied
     """
-    base = Image.fromarray(image).convert("RGB")
-    draw = ImageDraw.Draw(base, "RGBA")
+    base = Image.fromarray(image).convert("RGBA")
+    if alpha is not None:
+        base.putalpha(Image.fromarray(alpha))
     
-    leaves = root.all_leaves()
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
     
-    for node in leaves:
+    # leaves = root.all_leaves()
+    
+    for node in root.all_leaves():
         if node.w <= 0 or node.h <= 0:
+            continue
+        
+        if node.background_ratio >= bg_threshold:
+            draw.rectangle(
+                [node.x, node.y, node.x + node.w - 1, node.y + node.h - 1],
+                fill=(128, 128, 128, 80),
+                outline=(100, 100, 100, 120) if show_borders else None,
+                width=border_width
+            )
             continue
         
         r, g, b, _ = complexity_to_color(node.complexity, alpha=255)
@@ -93,7 +114,8 @@ def render_overlay(
             width = border_width
         )
     
-    return base
+    # Composite overlay onto base, alpha_composite respects both layers' alpha
+    return Image.alpha_composite(base, overlay)
 
 
 # Legend
@@ -125,9 +147,11 @@ def save_result(
     image: np.ndarray,
     root: QuadNode,
     output_path: str,
+    alpha: np.ndarray = None,
     fill_alpha: int = 120,
     show_borders: bool = True,
-    include_legend: bool = True
+    include_legend: bool = True,
+    bg_threshold: float = 0.5
 ) -> None:
     """
     Render and save the overlay image to disk.
@@ -139,11 +163,22 @@ def save_result(
         fill_alpha:     opacity of complexity fill
         show_borders:   draw quadrant borders
         include_legend: append a colorbar legend below the image
+        bg_threshold:   nodes with background_ratio >= this are skipped
     """
-    result = render_overlay(image, root, fill_alpha=fill_alpha, show_borders=show_borders)
+    result = render_overlay(
+        image, root,
+        alpha=alpha,
+        fill_alpha=fill_alpha,
+        show_borders=show_borders,
+        bg_threshold=bg_threshold
+    )
     
     if include_legend:
         legend = render_legend(width=result.width)
+        
+        result_rgb = Image.new("RGB", result.size, (255, 255, 255))
+        result_rgb.paste(result, mask=result.split()[3])
+        
         combined = Image.new("RGB", (result.width, result.height + legend.height))
         combined.paste(result, (0, 0))
         combined.paste(legend, (0, result.height))
