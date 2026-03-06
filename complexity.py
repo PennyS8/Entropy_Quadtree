@@ -52,7 +52,7 @@ def shannon_entropy(region: np.ndarray, mask: np.ndarray = None) -> float:
             continue
         
         # Count occurrences of each pixel value (0-255)
-        counts = np.bincount(channel, minlength=256)
+        counts = np.bincount(pixels, minlength=256)
         probs = counts / counts.sum()
         
         # Shannon entropy: -sum(p * log2(p)), max is log2(256) = 8 bits

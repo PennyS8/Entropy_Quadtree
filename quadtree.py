@@ -21,6 +21,10 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 import numpy as np
 
+# Nodes with this fraction of transparent pixels are treated as background:
+# excluded from stats, shown as grey in the overlay, and not split further.
+BG_THRESHOLD = 0.95
+
 
 # Data structure
 
@@ -69,10 +73,6 @@ class QuadTree:
                             None = always split to max_depth.
         min_size:           Minimum region side length in pixels (guard against
                             splitting into sub_pixel regions).
-        bg_threshold:       Fraction of transparent pixels above which a node is
-                            cosidered background (default 0.5 = majority transparent).
-        bg_split_threshold: Nodes with background_ratio >= this stop splitting
-                            early. Should be high (0.95)
     """
     
     def __init__(
@@ -81,15 +81,11 @@ class QuadTree:
         max_depth: Optional[int] = 6,
         threshold: Optional[float] = None,
         min_size: int = 8,
-        bg_threshold: float = 0.5,          # classify as background (stats + overlay)
-        bg_split_threshold: float = 0.95    # stop splitting
     ):
         self.scorer = scorer
         self.max_depth = max_depth
         self.threshold = threshold
         self.min_size = min_size
-        self.bg_threshold = bg_threshold
-        self.bg_split_threshold = bg_split_threshold
     
     def build(self, image: np.ndarray, alpha: Optional[np.ndarray] = None) -> QuadNode:
         """
@@ -150,8 +146,8 @@ class QuadTree:
         if self.threshold is not None and node.complexity < self.threshold:
             return
         
-        # Stop splitting only if almost entirely transparent
-        if node.background_ratio >= self.bg_split_threshold:
+        # Background, don't split nearly-transparent regions
+        if node.background_ratio >= BG_THRESHOLD:
             return
         
         # Split into four quadrants
@@ -181,14 +177,14 @@ class QuadTree:
 
 # Convenience stats
 
-def tree_stats(root: QuadNode, bg_threshold: float = 0.5) -> dict:
+def tree_stats(root: QuadNode) -> dict:
     """
     Return summary statistics for a built quadtree.
-
-    Useful for comparing images or tuning thresholds
+    Background nodes (background_ratio >= BG_THRESHOLD) are excluded from
+    complexity statistics.
     """
     all_leaves = root.all_leaves()
-    subject_leaves = [n for n in all_leaves if n.background_ratio < bg_threshold]
+    subject_leaves = [n for n in all_leaves if n.background_ratio < BG_THRESHOLD]
     
     if not subject_leaves:
         # Fallback if entire image is transparent
