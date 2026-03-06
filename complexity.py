@@ -12,12 +12,11 @@ Both return a float in [0, 1] where 1 = maximally complex
 
 import zlib
 import numpy as np
-from PIL import Image
 
 
 # Shannon Entropy
 
-def shannon_entropy(region: np.ndarray) -> float:
+def shannon_entropy(region: np.ndarray, mask: np.ndarray = None) -> float:
     """
     Compute normalized Shannon entropy of pixel values in a region.
     
@@ -26,6 +25,9 @@ def shannon_entropy(region: np.ndarray) -> float:
 
     Args:
         region: numpy array of shape (H, W) or (H, W, C), dtype uint8
+        mask:   optional boolean array (H, W), True = include pixel.
+                If provided, only opaque pixels contribute to the score.
+
 
     Returns:
         Float in [0, 1]. 0 = perfectly uniform, 1 = maximally random.
@@ -33,23 +35,29 @@ def shannon_entropy(region: np.ndarray) -> float:
     if region.size == 0:
         return 0.0
 
-    # Flatten to 1D per channel
     if region.ndim == 2:
-        channels = [region.flatten()]
+        channels = [region]
     else:
-        channels = [region[:, :, c].flatten() for c in range(region.shape[2])]
+        channels = [region[:, :, c] for c in range(region.shape[2])]
     
     entropies = []
     for channel in channels:
+        if mask is not None:
+            pixels = channel[mask]
+        else:
+            pixels = channel.flatten()
+        
+        if pixels.size == 0:
+            entropies.append(0.0)
+            continue
+        
         # Count occurrences of each pixel value (0-255)
         counts = np.bincount(channel, minlength=256)
         probs = counts / counts.sum()
         
-        # Remove zero probabilities before log
-        probs = probs[probs > 0]
-        
         # Shannon entropy: -sum(p * log2(p)), max is log2(256) = 8 bits
-        entropy = -np.sum(probs * np.log2(probs))
+        safe_log = np.where(probs > 0, np.log2(np.where(probs > 0, probs, 1)), 0)
+        entropy = -np.sum(probs * safe_log)
         entropies.append(entropy / 8.0) # normalize to [0, 1]
     
     return float(np.mean(entropies))
@@ -57,7 +65,7 @@ def shannon_entropy(region: np.ndarray) -> float:
 
 # Compression Ratio
 
-def compression_entropy(region: np.ndarray) -> float:
+def compression_entropy(region: np.ndarray, mask: np.ndarray = None) -> float:
     """
     Estimate complexity via zlib compression ratio.
     
@@ -67,11 +75,23 @@ def compression_entropy(region: np.ndarray) -> float:
     
     Args:
         region: numpy array of shape (H, W) or (H, W, C), dtype uint8
+        mask:   optional boolean array (H, W), True = include pixel.
+                If provided, only opaque pixels are compressed; prevents
+                transparent background pixels from delating the score.
 
     Returns:
         Float in [0, 1]. 0 = perfectly compressible, 1 = incompressible.
     """
-    raw = region.tobytes()
+    if mask is not None:
+        # Extract only the opaque pixels for compression
+        if region.ndim == 2:
+            raw = region[mask].tobytes()
+        else:
+            # Flatten each opaque pixel's channels together
+            raw = region[mask].tobytes()
+    else:
+        raw = region.tobytes()
+    
     if len(raw) == 0:
         return 0.0
     
