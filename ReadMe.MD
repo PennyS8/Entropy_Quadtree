@@ -65,6 +65,14 @@ To extract features only without rendering an overlay image per input:
 python batch.py --input my_images/ --output results/ --label real --no-overlay
 ```
 
+### RealVsFake dataset (wish096)
+
+```bash
+python3 batch.py --input "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Real" --output results/ --label real --no-overlay --workers 8
+
+python3 batch.py --input "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Fake" --output results/ --label ai --append --no-overlay --workers 8
+```
+
 ### Scatter plot
 
 Visualize how well complexity features separate image classes:
@@ -76,8 +84,8 @@ python scatter.py results/features.csv
 # Specify axes
 python scatter.py results/features.csv --x mean_boundary_delta --y std_complexity
 
-# Generate all feature pair combinations
-python scatter.py results/features.csv --all
+# Generate plots for all meaningful feature pairs (pruned)
+python scatter.py results/features.csv --auto
 ```
 
 ---
@@ -174,13 +182,13 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 | `--x` | `mean_complexity` | Feature for the x axis |
 | `--y` | `std_complexity` | Feature for the y axis |
 | `--output` | `<csv>_scatter.png` | Output image path |
-| `--all` | off | Generate scatter plots for all feature pair combinations |
+| `--auto` | off | Generate scatter plots for all feature pair combinations |
 
 ---
 
 ## Proof of Concept — AI Detection
 
-The compression quadtree produces meaningfully different signatures for real photographs and AI-generated images. Initial results on the CIFAKE dataset (10,000 real vs 10,000 AI-generated images) show visible separation in feature space using only `mean_complexity` and `std_complexity`:
+The compression quadtree produces meaningfully different signatures for real photographs and AI-generated images. Initial results on the RealVsFake dataset (81k real vs AI-generated images) show visible separation in feature space using only `mean_complexity` and `std_complexity`:
 
 ![Proof of concept comparison](proof_of_concept.png)
 
@@ -201,7 +209,7 @@ These signatures emerge from no training data and no learned model — purely fr
 - **Shannon entropy** produces a noisy grid at high depth due to statistical artifacts in small blocks. Use `--method compression` or raise `--min-size` to mitigate.
 - **Compression thresholds** are not on the same scale as Shannon thresholds. Start around `0.4` for compression adaptive splitting.
 - **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce elevated complexity scores if the subject content in that cell is detailed.
-- **CIFAKE** uses CIFAR-10 derived images (32×32 pixels upscaled) for the real class, which may not represent the full complexity distribution of high-resolution real photographs.
+- **RealVsFake** images are face-centric — results may not generalize to non-portrait subjects without further validation.
 
 ---
 

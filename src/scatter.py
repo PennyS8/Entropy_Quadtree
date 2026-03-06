@@ -1,6 +1,6 @@
 """
 scatter.py
-
+----------
 Visualize extracted features across a labeled dataset.
 
 Reads a CSV produced by features.py and generates scatter plots
@@ -9,7 +9,7 @@ showing how well complexity features separate image classes.
 Usage:
     python scatter.py features.csv
     python scatter.py features.csv --x mean_complexity --y std_complexity
-    python scatter.py features.csv --all   # generate all feature pair plots
+    python scatter.py features.csv --auto   # generate all feature pair plots
 """
 
 import argparse
@@ -22,12 +22,11 @@ from features import FEATURE_FIELDS
 
 # Label colors: real=green, ai=red, photoshopped=orange, unknown=grey
 LABEL_COLORS = {
-    
     "real":          (34,  197, 94,  220),
     "ai":            (239, 68,  68,  220),
     "photoshopped":  (249, 115, 22,  220),
     None:            (150, 150, 150, 220),
-    "":              (150, 150, 150, 220)
+    "":              (150, 150, 150, 220),
 }
 
 NUMERIC_FEATURES = [f for f in FEATURE_FIELDS if f not in ("filename", "label", "leaf_count")]
@@ -37,12 +36,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Scatter plot of image complexity features.")
     parser.add_argument("csv", help="Path to features CSV")
     parser.add_argument("--x", default="mean_complexity",
-                        help=f"X axis feature (defaultL mean_complexity)")
+                        help=f"X axis feature (default: mean_complexity)")
     parser.add_argument("--y", default="std_complexity",
                         help=f"Y axis feature (default: std_complexity)")
     parser.add_argument("--output", default=None,
                         help="Output image path (default: <csv>_scatter.png)")
-    parser.add_argument("--all", action="store_true",
+    parser.add_argument("--auto", action="store_true",
                         help="Generate scatter plots for all feature pairs")
     return parser.parse_args()
 
@@ -50,14 +49,13 @@ def parse_args():
 def load_data(csv_path: str) -> list:
     with open(csv_path, newline="") as f:
         rows = list(csv.DictReader(f))
-    # Convert numberic fields
+    # Convert numeric fields
     for row in rows:
         for field in NUMERIC_FEATURES + ["leaf_count"]:
             try:
                 row[field] = float(row[field])
             except (ValueError, KeyError):
                 row[field] = 0.0
-    
     return rows
 
 
@@ -75,36 +73,35 @@ def render_scatter(
     """
     x_vals = np.array([r[x_field] for r in rows], dtype=float)
     y_vals = np.array([r[y_field] for r in rows], dtype=float)
-    
+
     x_min, x_max = x_vals.min(), x_vals.max()
     y_min, y_max = y_vals.min(), y_vals.max()
-    
+
     # Add 10% padding
-    
     x_pad = (x_max - x_min) * 0.1 or 0.1
     y_pad = (y_max - y_min) * 0.1 or 0.1
     x_min -= x_pad; x_max += x_pad
     y_min -= y_pad; y_max += y_pad
-    
+
     plot_w = width - margin * 2
     plot_h = height - margin * 2
-    
+
     def to_px(x, y):
         px = margin + int((x - x_min) / (x_max - x_min) * plot_w)
         py = height - margin - int((y - y_min) / (y_max - y_min) * plot_h)
         return px, py
-    
+
     img = Image.new("RGB", (width, height), (20, 20, 20))
     draw = ImageDraw.Draw(img, "RGBA")
-    
+
     # Grid lines
     for i in range(5):
-        t = i/4
+        t = i / 4
         x_grid = margin + int(t * plot_w)
         y_grid = margin + int(t * plot_h)
         draw.line([(x_grid, margin), (x_grid, height - margin)], fill=(60, 60, 60))
         draw.line([(margin, y_grid), (width - margin, y_grid)], fill=(60, 60, 60))
-    
+
     # Axis labels (tick values)
     for i in range(5):
         t = i / 4
@@ -120,49 +117,58 @@ def render_scatter(
     draw.text((4, height // 2 - 40), y_field, fill=(200, 200, 200))
 
     # Data points
-    radius = 3
+    radius = 6
     for row in rows:
         x, y = to_px(row[x_field], row[y_field])
         label = row.get("label", "").strip() or None
         color = LABEL_COLORS.get(label, LABEL_COLORS[None])
         draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color)
-        # Filename label on hover not possible in PIL, show truncated name
-        name = row.get("filename:", "")[:12]
+        # Filename label on hover not possible in PIL — show truncated name
+        name = row.get("filename", "")[:12]
         draw.text((x + radius + 2, y - 6), name, fill=(180, 180, 180))
-        
-    # Legend
+
+    # Legend — only show labels present in the data
+    present_labels = sorted({row.get("label", "").strip() for row in rows} - {"", None})
     legend_x = width - margin - 140
     legend_y = margin
-    for label, color in LABEL_COLORS.items():
-        if label in (None, ""):
-            continue
+    for label in present_labels:
+        color = LABEL_COLORS.get(label, LABEL_COLORS[None])
         draw.ellipse([legend_x, legend_y, legend_x + 10, legend_y + 10], fill=color)
         draw.text((legend_x + 14, legend_y - 1), label, fill=(200, 200, 200))
         legend_y += 20
-    
+
     # Title
-    title = f"{x_field} vs {y_field}"
+    title = f"{x_field}  vs  {y_field}"
     draw.text((margin, 10), title, fill=(220, 220, 220))
-    
+
     return img
 
 
 def main():
     args = parse_args()
     rows = load_data(args.csv)
-    
+
     if not rows:
         print("No data found in CSV.")
         return
-    
+
     base = args.csv.rsplit(".", 1)[0]
-    
-    if args.all:
-        # Generate all unique feature pairs
-        pairs = [(NUMERIC_FEATURES[i], NUMERIC_FEATURES[j])
-                for i in range(len(NUMERIC_FEATURES))
-                for j in range(len(NUMERIC_FEATURES))]
+
+    if args.auto:
+        # Pruned feature pairs — drop mirrors, x_vs_x, dead features,
+        # and pairs that are known to be redundant from analysis
+        DEAD = {"mean_leaf_area", "std_leaf_area", "min_complexity",
+                "max_complexity", "mean_depth", "std_depth", "max_boundary_delta"}
+
+        useful = [f for f in NUMERIC_FEATURES if f not in DEAD]
+
+        # Upper triangle only (no mirrors, no x_vs_x)
+        pairs = [(useful[i], useful[j])
+                 for i in range(len(useful))
+                 for j in range(i + 1, len(useful))]
+
         os.makedirs(f"{base}_scatter_plots", exist_ok=True)
+        print(f"Generating {len(pairs)} plots (pruned from {len(NUMERIC_FEATURES)*(len(NUMERIC_FEATURES)-1)//2} total pairs)")
         for x_field, y_field in pairs:
             img = render_scatter(rows, x_field, y_field)
             out = f"{base}_scatter_plots/{x_field}_vs_{y_field}.png"
