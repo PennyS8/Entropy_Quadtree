@@ -62,12 +62,6 @@ def parse_args():
         help="Minimum region side length in pixels. Default: 8"
     )
     parser.add_argument(
-        "--bg-threshold",
-        type=float,
-        default=0.5,
-        help="Background mask threshold 0-1. Nodes with this fraction of transparent pixels are excluded. (default: 0.5)"
-    )
-    parser.add_argument(
         "--alpha",
         type=int,
         default=120,
@@ -87,32 +81,35 @@ def parse_args():
 
 def load_image(path: str) -> np.ndarray:
     """
-    Load an image and return as an RGB numpy array
-    Transparent images (RGBA, LA, P with transparency) are composited
-    onto a white background before conversion.
+    Load image, preserving transparency.
+
+    For RGBA images the full RGBA array is returned so transparent regions
+    remain transparent in the output. The alpha channel is also returned
+    separately for background masking and complexity scoring.
+
+    Returns:
+        image_array: (H, W, 4) RGBA or (H, W, 3) RGB uint8 numpy array
+        alpha:       (H, W) uint8 array, or None if no alpha channel
+        img:         PIL Image (for width/height reporting)
     """
     img = Image.open(path)
-    print(f"DEBUG mode={img.mode}, condition={img.mode in ('RGBA', 'LA')}")
     alpha = None
     
     if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
         img = img.convert("RGBA")
-        alpha = np.array(img.split()[3]) # extract alpha before compositing
-        background = Image.new("RGB", img.size, (255, 255, 255))
-        background.paste(img, mask=img.split()[3])
-        img = background
+        alpha = np.array(img.split()[3])
+        image_array = np.array(img)
     else:
         img = img.convert("RGB")
+        image_array = np.array(img)
     
-    return np.array(img), alpha, img
+    return image_array, alpha, img
 
 def main():
     args = parse_args()
     
     # Load image
-    image_array, alpha, img = load_image(args.image)
-    print(f"Alpha: {alpha is not None}, transparent pixels: {(alpha < 128).sum() if alpha is not None else 'N/A'}")
-    
+    image_array, alpha, img = load_image(args.image)    
     print(f"Image: {args.image} ({img.width}x{img.height})")
     print(f"Alpha channel: {'yes' if alpha is not None else 'no'}")
     
@@ -124,14 +121,12 @@ def main():
     max_depth = args.max_depth if args.max_depth > 0 else None
     print(f"Max depth: {max_depth or 'unlimited'}")
     print(f"Threshold: {args.threshold or 'off'}")
-    print(f"BG threshold: {args.bg_threshold}")
     
     qt = QuadTree(
         scorer = scorer,
         max_depth = max_depth,
         threshold = args.threshold,
         min_size = args.min_size,
-        bg_threshold = args.bg_threshold
     )
     
     # Build tree
@@ -139,7 +134,7 @@ def main():
     root = qt.build(image_array, alpha=alpha)
     
     # Print stats
-    stats = tree_stats(root, bg_threshold=args.bg_threshold)
+    stats = tree_stats(root)
     print("\nQuadtree Stats (subject only):")
     for k, v in stats.items():
         print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")
@@ -147,16 +142,13 @@ def main():
     
     # Render and save
     output_path = args.output or args.image.rsplit(".", 1)[0] + "_entropy.png"
-    
     save_result(
         image = image_array,
         root = root,
         output_path = output_path,
-        alpha = alpha,
         fill_alpha = args.alpha,
         show_borders = not args.no_borders,
-        include_legend = not args.no_legend,
-        bg_threshold = args.bg_threshold
+        include_legend = not args.no_legend
     )
 
 

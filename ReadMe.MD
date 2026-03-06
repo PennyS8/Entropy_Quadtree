@@ -1,4 +1,4 @@
-# Entropy_Quadtree
+# entropy_viz
 
 A Python tool that visualizes image complexity as an adaptive quadtree overlay using compression-based entropy scoring, with applications in AI-generated image detection and manipulation forensics.
 
@@ -6,7 +6,9 @@ A Python tool that visualizes image complexity as an adaptive quadtree overlay u
 
 ## Overview
 
-entropy_quadtree recursively subdivides an image into quadrants and scores each region for complexity. High-complexity regions — dense texture, fine detail, irregular structure — subdivide into smaller cells. Low-complexity regions — flat color, blurred backgrounds, repeated patterns — remain as large blocks. The result is an overlay where cell size and color both encode information density.
+entropy_viz recursively subdivides an image into quadrants and scores each region for complexity. High-complexity regions — dense texture, fine detail, irregular structure — subdivide into smaller cells. Low-complexity regions — flat color, blurred backgrounds, repeated patterns — remain as large blocks. The result is an overlay where cell size and color both encode information density.
+
+The core insight driving the project: compression ratio is a better proxy for true complexity than Shannon entropy. A blurred background has varied pixel values (high Shannon entropy) but compresses easily (low Kolmogorov complexity). zlib correctly identifies it as simple. Shannon does not.
 
 ---
 
@@ -16,20 +18,27 @@ entropy_quadtree recursively subdivides an image into quadrants and scores each 
 pip install pillow numpy
 ```
 
+Requires Python 3.7+.
+
 ---
 
 ## Usage
 
 ```bash
-# Compression entropy, adaptive depth
+# Compression entropy, fixed depth
 python main.py photo.jpg --method compression --max-depth 6
 
 # Shannon entropy, fixed depth
 python main.py photo.jpg --method shannon --max-depth 5
 
+# Adaptive splitting — stops when complexity drops below threshold
+python main.py photo.jpg --method compression --threshold 0.4
+
 # Both stopping conditions active
 python main.py photo.jpg --method compression --max-depth 6 --threshold 0.4
 
+# Batch process a folder
+python batch.py --input my_images/ --output results/ --method compression
 ```
 
 ---
@@ -40,22 +49,27 @@ python main.py photo.jpg --method compression --max-depth 6 --threshold 0.4
 
 Two complexity scorers are available, both returning a normalized float in `[0, 1]`:
 
-- **Shannon entropy** — measures pixel value distribution. Fast but blind to spatial repetition. Two images A and A+A (A concatenated with itself) score identically, which is wrong.
-- **Compression ratio** — compresses raw pixel bytes with zlib and measures how much they shrink. Correctly scores A+A as less complex than A. Slower but more principled — it approximates Kolmogorov complexity from above.
+- **Shannon entropy** — measures pixel value distribution. Fast but blind to spatial repetition..
+- **Compression ratio** — compresses raw pixel bytes with zlib and measures how much they shrink. Slower but more principled — it approximates Kolmogorov complexity from above.
+
+Both scorers accept an optional opacity mask and only score opaque pixels, so transparent regions don't corrupt the complexity measurement of boundary nodes.
 
 **Quadtree construction**
 
 The image is recursively split into four quadrants. Splitting stops when any of the following are met:
 
 - `max_depth` is reached (fixed mode)
-- Region complexity falls below `threshold` (adaptive mode)
+- Region complexity falls below `threshold` (adaptive mode) — evaluated on opaque pixels only
 - Region becomes smaller than `min_size` pixels
+- Region is >= 95% transparent (performance guard — no point subdividing empty space)
 
-Both stopping conditions can be active simultaneously.
+**Background masking**
+
+For RGBA images, each node is tagged with `background_ratio` (fraction of transparent pixels). Nodes above `bg_threshold` (default 0.5) are excluded from complexity statistics and shown as neutral grey in the overlay rather than a heatmap color.
 
 **Visualization**
 
-Each leaf node is drawn as a rectangle colored by its complexity score. The colormap runs blue (low) → green → yellow → red (high). Border lines between cells reveal the tree structure.
+Subject nodes are colored by complexity score: blue (low) → green → yellow → red (high). Background nodes appear as neutral grey. The output PNG preserves the original alpha channel so transparent regions remain transparent.
 
 ---
 
@@ -63,10 +77,11 @@ Each leaf node is drawn as a rectangle colored by its complexity score. The colo
 
 | File | Purpose |
 |------|---------|
-| `complexity.py` | Shannon entropy and compression ratio scorers |
-| `quadtree.py` | `QuadNode` dataclass and `QuadTree` builder |
-| `visualizer.py` | Overlay rendering and colorbar legend |
+| `complexity.py` | Shannon entropy and compression ratio scorers, with opacity mask support |
+| `quadtree.py` | `QuadNode` dataclass and `QuadTree` builder with background masking |
+| `visualizer.py` | Overlay rendering, RGBA preservation, and colorbar legend |
 | `main.py` | CLI entry point |
+| `batch.py` | Batch processing across a folder of images |
 
 ---
 
@@ -78,6 +93,7 @@ Each leaf node is drawn as a rectangle colored by its complexity score. The colo
 | `--max-depth` | `6` | Max split depth. `0` = adaptive only |
 | `--threshold` | off | Stop splitting below this complexity score |
 | `--min-size` | `8` | Minimum region side length (pixels) |
+| `--bg-threshold` | `0.5` | Nodes with this fraction of transparent pixels are excluded from stats and shown as grey |
 | `--alpha` | `120` | Overlay opacity (0–255) |
 | `--no-borders` | off | Hide quadrant border lines |
 | `--no-legend` | off | Omit colorbar legend |
@@ -92,11 +108,11 @@ The compression quadtree produces meaningfully different signatures for real pho
 
 **What the quadtree reveals:**
 
-- **Real photograph (bottom-right)** — smooth complexity gradient across the subject. Face scores moderate (green), hair shows genuine internal variation with highlights and strand direction producing locally different scores. No hard discontinuities.
+- **Real photograph** — smooth complexity gradient across the subject. Face scores moderate (green), hair shows genuine internal variation with highlights and strand direction producing locally different scores. No hard discontinuities.
 
-- **AI-generated (top)** — hair region scores uniformly high (red/orange) with little internal variation. The generator hallucinates plausible texture everywhere, producing complexity that is high but suspiciously homogeneous. Large background blocks reflect the trivially simple transparent region.
+- **AI-generated** — hair region scores uniformly high (red/orange) with little internal variation. The generator hallucinates plausible texture everywhere, producing complexity that is high but suspiciously homogeneous.
 
-- **Photoshopped hair (bottom-left)** — the recolored hair is flattened in complexity relative to the face. A hard complexity discontinuity appears at the manipulation boundary — the compressor sees the recolored region as more repetitive than surrounding original content. The face scores anomalously low relative to a natural portrait (note that this may be an artifact of the darker skin tone, further testing is needed).
+- **Photoshopped hair** — the recolored hair is flattened in complexity relative to the face. A hard complexity discontinuity appears at the manipulation boundary — the compressor sees the recolored region as more repetitive than surrounding original content.
 
 These signatures emerge from no training data and no learned model — purely from information-theoretic properties of the image content.
 
@@ -105,22 +121,21 @@ These signatures emerge from no training data and no learned model — purely fr
 ## Known Limitations
 
 - **Shannon entropy** produces a noisy grid at high depth (blocking artifact) because small blocks score erratically. Use `--method compression` or raise `--min-size` to mitigate.
-- **Compression thresholds** are not on the same scale as Shannon thresholds. A `--threshold` of `0.1` that works for Shannon will prune almost everything with compression. Start around `0.4` for compression.
-- **Transparent background regions** are currently composited to white and scored as low complexity. Background masking using the original alpha channel is needed.
+- **Compression thresholds** are not on the same scale as Shannon thresholds. Start around `0.4` for compression adaptive splitting.
+- **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce high complexity scores if the subject content in that cell is detailed.
 
 ---
 
 ## Future Plans
 
 **Near term**
-- Background masking: use the original alpha channel to exclude transparent regions from scoring, stats, and the overlay entirely
 - Feature extraction: distill each quadtree into a small feature vector (mean complexity, internal variance, boundary delta sharpness) exportable as CSV
 - Comparison mode: diff two images' complexity profiles side by side with a delta visualization
 
 **Medium term**
 - Labeled dataset pipeline: run the scorer across folders of known-real and known-AI images, output per-image feature CSVs, visualize population separation
 - Lightweight classifier: logistic regression on extracted features — no neural networks, architecture-agnostic by design
-- Merge-step delta scoring: measure the information gained at each split boundary, not just leaf complexity — this is where manipulation boundaries show up most clearly
+- Merge-step delta scoring: measure the information gained at each split boundary — this is where manipulation boundaries show up most clearly
 
 **Longer term**
 - Video pipeline: extract frames, build a complexity tensor across time, measure temporal stability of face-region complexity frame-to-frame
@@ -129,8 +144,16 @@ These signatures emerge from no training data and no learned model — purely fr
 
 ---
 
+## Related Work
+
+**Synthbuster** (2024) is the closest non-neural approach in the literature. It applies a cross-difference filter to highlight periodic artifacts in synthetic images, then extracts spectral features in the frequency domain and classifies them using gradient boosting. It targets GAN-specific upsampling artifacts — a different signal and a different domain from complexity-based analysis. Unlike Synthbuster, this project makes no assumptions about the generative architecture.
+
+General frequency-domain analysis has shown that GAN-generated images exhibit periodic spectral artifacts caused by upsampling operations. Compression-based complexity is architecture-agnostic by design and does not rely on these artifacts, which may not be present in diffusion-model outputs.
+
+---
+
 ## Background
 
 The theoretical grounding for this project is Kolmogorov complexity — the length of the shortest program that produces a given output. True Kolmogorov complexity is uncomputable (proven via reduction to the halting problem), but compression ratio provides a computable upper bound. The project explores how far this approximation can take a practical detector.
 
-The spatial distribution of complexity — not just a single score — is where the signal lives. Theoretically, a deepfake has a specific quadtree signature: a low-variance complexity island (the generated face) surrounded by a high-delta boundary ring, embedded in naturally varying terrain. That pattern is rare in unmanipulated photographs and detectable without any knowledge of the generative model that produced it.
+The spatial distribution of complexity — not just a single score — is where the signal lives. A deepfake has a specific quadtree signature: a low-variance complexity island (the generated face) surrounded by a high-delta boundary ring, embedded in naturally varying terrain. That pattern is rare in unmanipulated photographs and detectable without any knowledge of the generative model that produced it.
