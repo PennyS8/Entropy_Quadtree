@@ -10,7 +10,7 @@ Splitting stops when either:
     Region is almost entirely transparent (bg_split_threshold).
 
 Background masking: if an alpha channel is provided:
-    Compexity scoring excludes transparent pixels so boundry regions
+    Compexity scoring excludes transparent pixels so boundary regions
     aren't dragged down by easily-compressed background.
     Each node is tagged with background_ratio for use in stats/visualization
     bg_threshold controls classification (stats + overlay exclusion)
@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 import numpy as np
 
+BG_THRESHOLD = 0.95
 
 # Data structure
 

@@ -24,6 +24,8 @@ Requires Python 3.7+.
 
 ## Usage
 
+### Single image
+
 ```bash
 # Compression entropy, fixed depth
 python main.py photo.jpg --method compression --max-depth 6
@@ -37,8 +39,45 @@ python main.py photo.jpg --method compression --threshold 0.4
 # Both stopping conditions active
 python main.py photo.jpg --method compression --max-depth 6 --threshold 0.4
 
-# Batch process a folder
-python batch.py --input my_images/ --output results/ --method compression
+# Save to custom path, no legend
+python main.py photo.jpg -o result.png --no-legend
+```
+
+### Batch processing
+
+Run across a folder of images, producing overlay PNGs and a `features.csv`:
+
+```bash
+python batch.py --input my_images/ --output results/ --label real
+```
+
+To build a labeled dataset across multiple folders, use `--append` to accumulate into the same CSV:
+
+```bash
+python batch.py --input real_photos/  --output results/ --label real
+python batch.py --input ai_images/    --output results/ --label ai          --append
+python batch.py --input photoshopped/ --output results/ --label photoshopped --append
+```
+
+To extract features only without rendering an overlay image per input:
+
+```bash
+python batch.py --input my_images/ --output results/ --label real --no-overlay
+```
+
+### Scatter plot
+
+Visualize how well complexity features separate image classes:
+
+```bash
+# Default: mean_complexity vs std_complexity
+python scatter.py results/features.csv
+
+# Specify axes
+python scatter.py results/features.csv --x mean_boundary_delta --y std_complexity
+
+# Generate all feature pair combinations
+python scatter.py results/features.csv --all
 ```
 
 ---
@@ -49,7 +88,7 @@ python batch.py --input my_images/ --output results/ --method compression
 
 Two complexity scorers are available, both returning a normalized float in `[0, 1]`:
 
-- **Shannon entropy** — measures pixel value distribution. Fast but blind to spatial repetition..
+- **Shannon entropy** — measures pixel value distribution. Fast but blind to spatial repetition.
 - **Compression ratio** — compresses raw pixel bytes with zlib and measures how much they shrink. Slower but more principled — it approximates Kolmogorov complexity from above.
 
 Both scorers accept an optional opacity mask and only score opaque pixels, so transparent regions don't corrupt the complexity measurement of boundary nodes.
@@ -61,15 +100,34 @@ The image is recursively split into four quadrants. Splitting stops when any of 
 - `max_depth` is reached (fixed mode)
 - Region complexity falls below `threshold` (adaptive mode) — evaluated on opaque pixels only
 - Region becomes smaller than `min_size` pixels
-- Region is >= 95% transparent (performance guard — no point subdividing empty space)
+- Region is >= 95% transparent (background guard)
 
 **Background masking**
 
-For RGBA images, each node is tagged with `background_ratio` (fraction of transparent pixels). Nodes above `bg_threshold` (default 0.5) are excluded from complexity statistics and shown as neutral grey in the overlay rather than a heatmap color.
+For RGBA images, each node is tagged with `background_ratio` (fraction of transparent pixels). Nodes above `BG_THRESHOLD` (0.95) are excluded from complexity statistics and shown as neutral grey in the overlay.
 
 **Visualization**
 
 Subject nodes are colored by complexity score: blue (low) → green → yellow → red (high). Background nodes appear as neutral grey. The output PNG preserves the original alpha channel so transparent regions remain transparent.
+
+**Feature extraction**
+
+Each quadtree is distilled into a feature vector and written to `features.csv`:
+
+| Feature | Description |
+|---------|-------------|
+| `mean_complexity` | Average complexity across subject leaf nodes |
+| `std_complexity` | Variance — low in AI images which tend toward uniform complexity |
+| `min_complexity` | Floor of complexity |
+| `max_complexity` | Ceiling of complexity |
+| `complexity_range` | max − min |
+| `mean_leaf_area` | Average subject leaf area in pixels |
+| `std_leaf_area` | Variance in leaf area |
+| `leaf_count` | Total subject leaf count |
+| `mean_boundary_delta` | Average complexity jump between parent and child nodes |
+| `max_boundary_delta` | Maximum boundary jump — manipulation signal |
+| `mean_depth` | Average depth of subject leaf nodes |
+| `std_depth` | Variance in depth |
 
 ---
 
@@ -80,12 +138,16 @@ Subject nodes are colored by complexity score: blue (low) → green → yellow �
 | `complexity.py` | Shannon entropy and compression ratio scorers, with opacity mask support |
 | `quadtree.py` | `QuadNode` dataclass and `QuadTree` builder with background masking |
 | `visualizer.py` | Overlay rendering, RGBA preservation, and colorbar legend |
-| `main.py` | CLI entry point |
-| `batch.py` | Batch processing across a folder of images |
+| `features.py` | Feature extraction and CSV export |
+| `scatter.py` | Scatter plot visualization of extracted features |
+| `main.py` | Single image CLI entry point |
+| `batch.py` | Batch processing, feature extraction, and labeled dataset pipeline |
 
 ---
 
 ## Options
+
+**main.py**
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -93,26 +155,42 @@ Subject nodes are colored by complexity score: blue (low) → green → yellow �
 | `--max-depth` | `6` | Max split depth. `0` = adaptive only |
 | `--threshold` | off | Stop splitting below this complexity score |
 | `--min-size` | `8` | Minimum region side length (pixels) |
-| `--bg-threshold` | `0.5` | Nodes with this fraction of transparent pixels are excluded from stats and shown as grey |
 | `--alpha` | `120` | Overlay opacity (0–255) |
 | `--no-borders` | off | Hide quadrant border lines |
 | `--no-legend` | off | Omit colorbar legend |
+
+**batch.py** (includes all main.py options plus):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--label` | none | Label for all images in this batch (`real`, `ai`, `photoshopped`) |
+| `--append` | off | Append to existing `features.csv` instead of overwriting |
+| `--no-overlay` | off | Skip overlay rendering, extract features only |
+
+**scatter.py**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--x` | `mean_complexity` | Feature for the x axis |
+| `--y` | `std_complexity` | Feature for the y axis |
+| `--output` | `<csv>_scatter.png` | Output image path |
+| `--all` | off | Generate scatter plots for all feature pair combinations |
 
 ---
 
 ## Proof of Concept — AI Detection
 
-The compression quadtree produces meaningfully different signatures for real photographs, AI-generated images, and photoshopped images. The comparison below uses three portraits of models with dyed hair — one real photograph, one AI-generated, and one photograph with the hair color changed in Photoshop.
+The compression quadtree produces meaningfully different signatures for real photographs and AI-generated images. Initial results on the CIFAKE dataset (10,000 real vs 10,000 AI-generated images) show visible separation in feature space using only `mean_complexity` and `std_complexity`:
 
 ![Proof of concept comparison](proof_of_concept.png)
 
-**What the quadtree reveals:**
+Real images cluster toward lower mean complexity and higher variance — natural photographs have regions of simple and complex content. AI-generated images cluster toward higher mean complexity and lower variance — generators produce uniformly high complexity with little internal differentiation.
 
-- **Real photograph** — smooth complexity gradient across the subject. Face scores moderate (green), hair shows genuine internal variation with highlights and strand direction producing locally different scores. No hard discontinuities.
+**What the quadtree reveals on individual images:**
 
-- **AI-generated** — hair region scores uniformly high (red/orange) with little internal variation. The generator hallucinates plausible texture everywhere, producing complexity that is high but suspiciously homogeneous.
-
-- **Photoshopped hair** — the recolored hair is flattened in complexity relative to the face. A hard complexity discontinuity appears at the manipulation boundary — the compressor sees the recolored region as more repetitive than surrounding original content.
+- **Real photograph** — smooth complexity gradient. Face scores moderate (green), hair shows genuine internal variation. No hard discontinuities.
+- **AI-generated** — hair and skin score uniformly high (red/orange) with little internal variation. The generator hallucinates plausible texture everywhere.
+- **Photoshopped** — recolored regions are flattened in complexity. A hard discontinuity appears at the manipulation boundary.
 
 These signatures emerge from no training data and no learned model — purely from information-theoretic properties of the image content.
 
@@ -120,25 +198,26 @@ These signatures emerge from no training data and no learned model — purely fr
 
 ## Known Limitations
 
-- **Shannon entropy** produces a noisy grid at high depth (blocking artifact) because small blocks score erratically. Use `--method compression` or raise `--min-size` to mitigate.
+- **Shannon entropy** produces a noisy grid at high depth due to statistical artifacts in small blocks. Use `--method compression` or raise `--min-size` to mitigate.
 - **Compression thresholds** are not on the same scale as Shannon thresholds. Start around `0.4` for compression adaptive splitting.
-- **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce high complexity scores if the subject content in that cell is detailed.
+- **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce elevated complexity scores if the subject content in that cell is detailed.
+- **CIFAKE** uses CIFAR-10 derived images (32×32 pixels upscaled) for the real class, which may not represent the full complexity distribution of high-resolution real photographs.
 
 ---
 
 ## Future Plans
 
 **Near term**
-- Feature extraction: distill each quadtree into a small feature vector (mean complexity, internal variance, boundary delta sharpness) exportable as CSV
-- Comparison mode: diff two images' complexity profiles side by side with a delta visualization
+- ✅ Feature extraction: distill each quadtree into a feature vector exportable as CSV
+- ✅ Scatter plot visualization of feature separation across labeled datasets
+- Lightweight classifier: logistic regression on extracted features — no neural networks, architecture-agnostic by design
 
 **Medium term**
-- Labeled dataset pipeline: run the scorer across folders of known-real and known-AI images, output per-image feature CSVs, visualize population separation
-- Lightweight classifier: logistic regression on extracted features — no neural networks, architecture-agnostic by design
 - Merge-step delta scoring: measure the information gained at each split boundary — this is where manipulation boundaries show up most clearly
+- Expand dataset: test against FFHQ (real) vs StyleGAN / Stable Diffusion outputs
 
 **Longer term**
-- Video pipeline: extract frames, build a complexity tensor across time, measure temporal stability of face-region complexity frame-to-frame
+- Video pipeline: extract frames, build a complexity tensor across time, measure temporal stability of face-region complexity
 - Audio-visual correlation: score whether facial complexity changes correlate with audio energy — a signal that breaks in dubbed or voice-synthesized deepfakes
 - Benchmark against neural network deepfake detectors on unseen generative architectures — the architecture-agnostic approach should generalize where trained detectors fail
 

@@ -1,6 +1,6 @@
 """
 batch.py
---------
+
 Run the entropy visualizer on every image in a folder.
 Produces overlay images and a features.csv for scatter plot analysis.
 
@@ -130,7 +130,7 @@ def main():
             print(f"subject leaves: {stats['subject_leaf_count']}"
                   f"mean: {stats['mean_leaf_complexity']:4f}"
                   f"std: {stats['std_leaf_complexity']:4f}"
-                  f"boundry_delta: {feat.mean_boundry_delta:.4f}")
+                  f"boundary_delta: {feat.mean_boundary_delta:.4f}")
             
             # Render overlay
             if not args.no_overlay:
