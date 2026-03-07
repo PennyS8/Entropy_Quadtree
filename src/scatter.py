@@ -117,15 +117,15 @@ def render_scatter(
     draw.text((4, height // 2 - 40), y_field, fill=(200, 200, 200))
 
     # Data points
-    radius = 6
+    radius = 1.5
     for row in rows:
         x, y = to_px(row[x_field], row[y_field])
         label = row.get("label", "").strip() or None
         color = LABEL_COLORS.get(label, LABEL_COLORS[None])
         draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color)
         # Filename label on hover not possible in PIL — show truncated name
-        name = row.get("filename", "")[:12]
-        draw.text((x + radius + 2, y - 6), name, fill=(180, 180, 180))
+        # name = row.get("filename", "")[:12]
+        # draw.text((x + radius + 2, y - 6), name, fill=(180, 180, 180))
 
     # Legend — only show labels present in the data
     present_labels = sorted({row.get("label", "").strip() for row in rows} - {"", None})

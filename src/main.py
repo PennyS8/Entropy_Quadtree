@@ -1,21 +1,26 @@
 """
 main.py
 
-CLI entry point for the entropy visualizer.
+CLI entry point for the entropy visualizer. Processes a single image and
+saves an overlay PNG showing the quadtree complexity map.
 
-Usage examples:
+Usage:
+    python main.py photo.jpg
+    python main.py photo.jpg --method compression
+    python main.py photo.jpg --method shannon --leaf-size 4
+    python main.py photo.jpg --method compression --threshold 0.05
+    python main.py photo.jpg -o result.png --no-legend --no-borders
 
-    # Shannon entropy, fixed depth 5, overlay on image
-    python main.py photo.jpg --method shannon --max-depth 5
-    
-    # Compression entropy, adaptive splitting at threshold 0.3
-    python main.py photo.jpg --method compression --threshold 0.3
-    
-    # Both stopping conditions active
-    python main.py photo.jpg -method compression --max-depth 6 --threshold 0.2
-    
-    # Save to custom path, no legend
-    python main.py photo.jpg -o result.png --no-legend
+Optional args:
+    --method      shannon|compression|variance (default: shannon)
+                  shannon:     pixel value distribution — works at any leaf size
+                  compression: zlib compressibility — reliable at leaf-size >= 16
+                  variance:    fastest — single np.var call, good compression proxy
+    --leaf_size   int                   (default: 4)
+    --threshold   float                 (default: off)
+    --alpha       int                   (default: 120)
+    --borders                           show quadrant border lines
+    --legend                            show the colorbar legend
 """
 
 import argparse
@@ -33,22 +38,21 @@ def parse_args():
     )
     parser.add_argument("image", help="Path to input image file")
     parser.add_argument(
-        "-0", "--output",
+        "-o", "--output",
         default=None,
         help="Output file path  (default: <input>_entropy.png)"
     )
     parser.add_argument(
         "--method",
-        choices=["shannon", "compression"],
+        choices=["shannon", "compression", "variance"],
         default="shannon",
         help="Complexity scoring method (default: shannon)"
     )
     parser.add_argument(
-        "--max-depth",
+        "--leaf_size",
         type=int,
-        default=6,
-        help="Maximum quadtree depth. Set to 0 to disable (adaptive only). Default: 6"
-    )
+        default=4,
+        help="Target leaf side length in pixels. Smaller = finer detail. (default: 4)")
     parser.add_argument(
         "--threshold",
         type=float,
@@ -56,16 +60,10 @@ def parse_args():
         help="Adaptive threshold: stop splitting below this complexity. Default: off"
     )
     parser.add_argument(
-        "--min-size",
-        type=int,
-        default=8,
-        help="Minimum region side length in pixels. Default: 8"
-    )
-    parser.add_argument(
         "--bg-threshold",
         type=float,
-        default=0.5,
-        help="Background mask threshold 0-1. Nodes with this fraction of transparent pixels are excluded. (default: 0.5)"
+        default=0.95,
+        help="Background mask threshold 0-1. Nodes with this fraction of transparent pixels are excluded. (default: 0.95)"
     )
     parser.add_argument(
         "--alpha",
@@ -74,14 +72,14 @@ def parse_args():
         help="Overlay opacity 0-255. Default: 120"
     )
     parser.add_argument(
-        "--no-borders",
+        "--borders",
         action="store_true",
-        help="Hide quadrant border lines"
+        help="Show quadrant border lines"
     )
     parser.add_argument(
-        "--no-legend",
+        "--legend",
         action="store_true",
-        help="Omit the colorbar legend"
+        help="Show the colorbar legend"
     )
     return parser.parse_args()
 
@@ -110,9 +108,7 @@ def main():
     args = parse_args()
     
     # Load image
-    image_array, alpha, img = load_image(args.image)
-    print(f"Alpha: {alpha is not None}, transparent pixels: {(alpha < 128).sum() if alpha is not None else 'N/A'}")
-    
+    image_array, alpha, img = load_image(args.image)    
     print(f"Image: {args.image} ({img.width}x{img.height})")
     print(f"Alpha channel: {'yes' if alpha is not None else 'no'}")
     
@@ -121,22 +117,21 @@ def main():
     print(f"Method: {args.method}")
     
     # Configure quadtree
-    max_depth = args.max_depth if args.max_depth > 0 else None
-    print(f"Max depth: {max_depth or 'unlimited'}")
+    # Use method-appropriate default if user did not explicitly set leaf_size
+    DEFAULT_LEAF_SIZE = {"shannon": 4, "compression": 16, "variance": 4}
+    leaf_size = args.leaf_size if args.leaf_size is not None else DEFAULT_LEAF_SIZE[args.method]
+    print(f"Leaf size: {args.leaf_size}px")
     print(f"Threshold: {args.threshold or 'off'}")
-    print(f"BG threshold: {args.bg_threshold}")
     
     qt = QuadTree(
         scorer = scorer,
-        max_depth = max_depth,
-        threshold = args.threshold,
-        min_size = args.min_size,
-        bg_threshold = args.bg_threshold
+        leaf_size = leaf_size,
+        threshold = args.threshold
     )
     
     # Build tree
     print("Building quadtree...")
-    root = qt.build(image_array, alpha=alpha)
+    root = qt.build(image_array, alpha=alpha, normalize=True)
     
     # Print stats
     stats = tree_stats(root, bg_threshold=args.bg_threshold)
@@ -147,16 +142,14 @@ def main():
     
     # Render and save
     output_path = args.output or args.image.rsplit(".", 1)[0] + "_entropy.png"
-    
     save_result(
         image = image_array,
         root = root,
         output_path = output_path,
         alpha = alpha,
         fill_alpha = args.alpha,
-        show_borders = not args.no_borders,
-        include_legend = not args.no_legend,
-        bg_threshold = args.bg_threshold
+        show_borders = args.borders,
+        include_legend = args.legend
     )
 
 

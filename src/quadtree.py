@@ -4,9 +4,8 @@ quadtree.py
 Builds a complexity quadtree over an image.
 
 Splitting stops when either:
-    Max_depth is reached (fixed mode).
+    leaf_size is reached (fixed mode).
     Region complexity falls below threshold (adaptive mode).
-    Region becomes too small to split further (min_size guard).
     Region is almost entirely transparent (bg_split_threshold).
 
 Background masking: if an alpha channel is provided:
@@ -64,38 +63,28 @@ class QuadTree:
     Builds a complexity quadtree over a numpy image array.
     
     Args:
-        scorer:             Callable(np.ndarray) -> float, see complexity.py
-        max_depth:          Maximum split depth. None = unlimited (adaptive only).
-        threshold:          Stop splitting when complexity < threshold.
-                            None = always split to max_depth.
-        min_size:           Minimum region side length in pixels (guard against
-                            splitting into sub_pixel regions).
-        bg_threshold:       Fraction of transparent pixels above which a node is
-                            cosidered background (default 0.5 = majority transparent).
-        bg_split_threshold: Nodes with background_ratio >= this stop splitting
-                            early. Should be high (0.95)
+        scorer:     Callable(np.ndarray) -> float, see complexity.py
+        leaf_size:  Maximum split depth. None = unlimited (adaptive only).
+        threshold:  Percentile (0-100) below which leaves are pruned after the
+                    full tree is built. E.g. threshold=25 collapses the least
+                    complex 25% of leaves back into their parent. Content-adaptive,
+                    percentile is computed from the image itself. Default None.
     """
     
     def __init__(
         self,
         scorer: Callable[[np.ndarray], float],
-        max_depth: Optional[int] = 6,
-        threshold: Optional[float] = None,
-        min_size: int = 8,
-        bg_threshold: float = 0.5,          # classify as background (stats + overlay)
-        bg_split_threshold: float = 0.95    # stop splitting
+        leaf_size: Optional[int] = 4,
+        threshold: Optional[float] = None
     ):
         self.scorer = scorer
-        self.max_depth = max_depth
+        self.leaf_size = leaf_size
         self.threshold = threshold
-        self.min_size = min_size
-        self.bg_threshold = bg_threshold
-        self.bg_split_threshold = bg_split_threshold
     
-    def build(self, image: np.ndarray, alpha: Optional[np.ndarray] = None) -> QuadNode:
+    def build(self, image: np.ndarray, alpha: Optional[np.ndarray] = None, normalize: bool = False) -> QuadNode:
         """
         Build the quadtree for the given image.
-
+        
         Args:
             image:  numpy array (H, W) or (H, W, C), dtype uint8
             alpha:  optional numpy array (H, W) unit8, 0=transparent 255=opaque.
@@ -109,8 +98,48 @@ class QuadTree:
         mask = self._make_mask(alpha, 0, 0, w, h) if alpha is not None else None
         root_complexity = self.scorer(image, mask)
         root = QuadNode(x=0, y=0, w=w, h=h, depth=0, complexity=root_complexity, background_ratio=bg_ratio)
+        
         self._split(root, image, alpha)
+        
+        # Adaptive variance normalization (overlay only)
+        if normalize and root.complexity > 1.0:
+            raw_vals = np.array([n.complexity for n in root.all_leaves()])
+            p99 = float(np.percentile(raw_vals, 99)) or 1.0
+            for node in self._all_nodes(root):
+                node.complexity = float(min(np.sqrt(node.complexity / p99), 1.0))
+        
+        # Prune below percentile threshold
+        if self.threshold is not None:
+            all_leaves = root.all_leaves()
+            subject_leaves = [n for n in all_leaves if n.background_ratio < BG_THRESHOLD]
+            if subject_leaves:
+                complexities = np.array([n.complexity for n in subject_leaves])
+                cutoff = float(np.percentile(complexities, self.threshold))
+                self._prune(root, cutoff)
+        
         return root
+    
+    def _all_nodes(self, root: QuadNode):
+        """Yield every node in the tree (internal + leaves)."""
+        queue = [root]
+        while queue:
+            node = queue.pop()
+            yield node
+            queue.extend(node.children)
+    
+    def _prune(self, node: QuadNode, cutoff: float) -> None:
+        """
+        Recursively collapse any internal node whose children are all leaves
+        and all score below the cutoff complexity.
+        """
+        if node.is_leaf:
+            return
+        # Recurse into children first (bottom-up)
+        for child in node.children:
+            self._prune(child, cutoff)
+        # Collapse this node if all children are now leaves below cutoff
+        if all(c.is_leaf and c.complexity < cutoff for c in node.children):
+            node.children.clear()
     
     def _bg_ratio(self, alpha: np.ndarray, x: int, y: int, w: int, h: int) -> float:
         """Return the fraction of pixels in this region that are transparent (alpha < 128)."""
@@ -139,20 +168,12 @@ class QuadTree:
         
         # Stopping conditions
         
-        # Too small to split
-        if node.w < self.min_size * 2 or node.h < self.min_size * 2:
+        # Leaf size reached — children would be at or below target size
+        if node.w // 2 <= self.leaf_size or node.h // 2 <= self.leaf_size:
             return
-        
-        # Max depth reached
-        if self.max_depth is not None and node.depth >= self.max_depth:
-            return
-        
-        # Complexity below threshold (adaptive)
-        if self.threshold is not None and node.complexity < self.threshold:
-            return
-        
-        # Stop splitting only if almost entirely transparent
-        if node.background_ratio >= self.bg_split_threshold:
+
+        # Background — don't split nearly-transparent regions
+        if node.background_ratio >= BG_THRESHOLD:
             return
         
         # Split into four quadrants
@@ -177,17 +198,21 @@ class QuadTree:
             
             child = QuadNode(x=x, y=y, w=w, h=h, depth=node.depth + 1, complexity=complexity, background_ratio=bg_ratio)
             node.children.append(child)
+            
+            # # Relative threshold, skip recursing if child complexity didn't
+            # # change enough from parent to justify further splitting
+            # if self.threshold is not None:
+            #     delta = abs(complexity - node.complexity)
+            #     if delta < self.threshold:
+            #         continue
+            
             self._split(child, image, alpha)
 
 
 # Convenience stats
 
 def tree_stats(root: QuadNode, bg_threshold: float = 0.5) -> dict:
-    """
-    Return summary statistics for a built quadtree.
-
-    Useful for comparing images or tuning thresholds
-    """
+    """Summary statistics for a built quadtree."""
     all_leaves = root.all_leaves()
     subject_leaves = [n for n in all_leaves if n.background_ratio < bg_threshold]
     
