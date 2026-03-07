@@ -1,4 +1,5 @@
 # entropy_viz
+# entropy_viz
 
 A Python tool that visualizes image complexity as an adaptive quadtree overlay using compression-based entropy scoring, with applications in AI-generated image detection and manipulation forensics.
 
@@ -6,6 +7,9 @@ A Python tool that visualizes image complexity as an adaptive quadtree overlay u
 
 ## Overview
 
+entropy_viz recursively subdivides an image into quadrants and scores each region for complexity. High-complexity regions — dense texture, fine detail, irregular structure — subdivide into smaller cells. Low-complexity regions — flat color, blurred backgrounds, repeated patterns — remain as large blocks. The result is an overlay where cell size and color both encode information density.
+
+The core insight driving the project: compression ratio is a better proxy for true complexity than Shannon entropy. A blurred background has varied pixel values (high Shannon entropy) but compresses easily (low Kolmogorov complexity). zlib correctly identifies it as simple. Shannon does not.
 entropy_viz recursively subdivides an image into quadrants and scores each region for complexity. High-complexity regions — dense texture, fine detail, irregular structure — subdivide into smaller cells. Low-complexity regions — flat color, blurred backgrounds, repeated patterns — remain as large blocks. The result is an overlay where cell size and color both encode information density.
 
 The core insight driving the project: compression ratio is a better proxy for true complexity than Shannon entropy. A blurred background has varied pixel values (high Shannon entropy) but compresses easily (low Kolmogorov complexity). zlib correctly identifies it as simple. Shannon does not.
@@ -20,6 +24,8 @@ pip install pillow numpy
 
 Requires Python 3.7+.
 
+Requires Python 3.7+.
+
 ---
 
 ## Usage
@@ -28,10 +34,14 @@ Requires Python 3.7+.
 
 ```bash
 # Compression entropy, fixed depth
+# Compression entropy, fixed depth
 python main.py photo.jpg --method compression --max-depth 6
 
 # Shannon entropy, fixed depth
 python main.py photo.jpg --method shannon --max-depth 5
+
+# Adaptive splitting — stops when complexity drops below threshold
+python main.py photo.jpg --method compression --threshold 0.4
 
 # Adaptive splitting — stops when complexity drops below threshold
 python main.py photo.jpg --method compression --threshold 0.4
@@ -107,6 +117,7 @@ The image is recursively split into four quadrants. Splitting stops when any of 
 
 - `max_depth` is reached (fixed mode)
 - Region complexity falls below `threshold` (adaptive mode) — evaluated on opaque pixels only
+- Region complexity falls below `threshold` (adaptive mode) — evaluated on opaque pixels only
 - Region becomes smaller than `min_size` pixels
 - Region is >= 95% transparent (background guard)
 
@@ -163,6 +174,7 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 | `--max-depth` | `6` | Max split depth. `0` = adaptive only |
 | `--threshold` | off | Stop splitting below this complexity score |
 | `--min-size` | `8` | Minimum region side length (pixels) |
+| `--bg-threshold` | `0.5` | Nodes with this fraction of transparent pixels are excluded from stats and shown as grey |
 | `--alpha` | `120` | Overlay opacity (0–255) |
 | `--no-borders` | off | Hide quadrant border lines |
 | `--no-legend` | off | Omit colorbar legend |
@@ -239,8 +251,17 @@ General frequency-domain analysis has shown that GAN-generated images exhibit pe
 
 ---
 
+## Related Work
+
+**Synthbuster** (2024) is the closest non-neural approach in the literature. It applies a cross-difference filter to highlight periodic artifacts in synthetic images, then extracts spectral features in the frequency domain and classifies them using gradient boosting. It targets GAN-specific upsampling artifacts — a different signal and a different domain from complexity-based analysis. Unlike Synthbuster, this project makes no assumptions about the generative architecture.
+
+General frequency-domain analysis has shown that GAN-generated images exhibit periodic spectral artifacts caused by upsampling operations. Compression-based complexity is architecture-agnostic by design and does not rely on these artifacts, which may not be present in diffusion-model outputs.
+
+---
+
 ## Background
 
 The theoretical grounding for this project is Kolmogorov complexity — the length of the shortest program that produces a given output. True Kolmogorov complexity is uncomputable (proven via reduction to the halting problem), but compression ratio provides a computable upper bound. The project explores how far this approximation can take a practical detector.
 
+The spatial distribution of complexity — not just a single score — is where the signal lives. A deepfake has a specific quadtree signature: a low-variance complexity island (the generated face) surrounded by a high-delta boundary ring, embedded in naturally varying terrain. That pattern is rare in unmanipulated photographs and detectable without any knowledge of the generative model that produced it.
 The spatial distribution of complexity — not just a single score — is where the signal lives. A deepfake has a specific quadtree signature: a low-variance complexity island (the generated face) surrounded by a high-delta boundary ring, embedded in naturally varying terrain. That pattern is rare in unmanipulated photographs and detectable without any knowledge of the generative model that produced it.

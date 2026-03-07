@@ -85,24 +85,29 @@ def parse_args():
 
 def load_image(path: str) -> np.ndarray:
     """
-    Load an image and return as an RGB numpy array
-    Transparent images (RGBA, LA, P with transparency) are composited
-    onto a white background before conversion.
+    Load image, preserving transparency.
+
+    For RGBA images the full RGBA array is returned so transparent regions
+    remain transparent in the output. The alpha channel is also returned
+    separately for background masking and complexity scoring.
+
+    Returns:
+        image_array: (H, W, 4) RGBA or (H, W, 3) RGB uint8 numpy array
+        alpha:       (H, W) uint8 array, or None if no alpha channel
+        img:         PIL Image (for width/height reporting)
     """
     img = Image.open(path)
-    print(f"DEBUG mode={img.mode}, condition={img.mode in ('RGBA', 'LA')}")
     alpha = None
     
     if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
         img = img.convert("RGBA")
-        alpha = np.array(img.split()[3]) # extract alpha before compositing
-        background = Image.new("RGB", img.size, (255, 255, 255))
-        background.paste(img, mask=img.split()[3])
-        img = background
+        alpha = np.array(img.split()[3])
+        image_array = np.array(img)
     else:
         img = img.convert("RGB")
+        image_array = np.array(img)
     
-    return np.array(img), alpha, img
+    return image_array, alpha, img
 
 def main():
     args = parse_args()
@@ -134,7 +139,7 @@ def main():
     root = qt.build(image_array, alpha=alpha, normalize=True)
     
     # Print stats
-    stats = tree_stats(root, bg_threshold=args.bg_threshold)
+    stats = tree_stats(root)
     print("\nQuadtree Stats (subject only):")
     for k, v in stats.items():
         print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")
@@ -146,7 +151,6 @@ def main():
         image = image_array,
         root = root,
         output_path = output_path,
-        alpha = alpha,
         fill_alpha = args.alpha,
         show_borders = args.borders,
         include_legend = args.legend

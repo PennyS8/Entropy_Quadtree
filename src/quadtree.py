@@ -20,7 +20,10 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 import numpy as np
 
+# Nodes with this fraction of transparent pixels are treated as background:
+# excluded from stats, shown as grey in the overlay, and not split further.
 BG_THRESHOLD = 0.95
+
 
 # Data structure
 
@@ -214,7 +217,7 @@ class QuadTree:
 def tree_stats(root: QuadNode, bg_threshold: float = 0.5) -> dict:
     """Summary statistics for a built quadtree."""
     all_leaves = root.all_leaves()
-    subject_leaves = [n for n in all_leaves if n.background_ratio < bg_threshold]
+    subject_leaves = [n for n in all_leaves if n.background_ratio < BG_THRESHOLD]
     
     if not subject_leaves:
         # Fallback if entire image is transparent
