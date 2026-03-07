@@ -1,7 +1,6 @@
 # entropy_viz
-# entropy_viz
 
-A Python tool that visualizes image complexity as an adaptive quadtree overlay using compression-based entropy scoring, with applications in AI-generated image detection and manipulation forensics.
+A Python tool that visualizes image complexity as an adaptive quadtree overlay using entropy scoring, with applications in AI-generated image detection and manipulation forensics.
 
 ---
 
@@ -9,10 +8,7 @@ A Python tool that visualizes image complexity as an adaptive quadtree overlay u
 
 entropy_viz recursively subdivides an image into quadrants and scores each region for complexity. High-complexity regions — dense texture, fine detail, irregular structure — subdivide into smaller cells. Low-complexity regions — flat color, blurred backgrounds, repeated patterns — remain as large blocks. The result is an overlay where cell size and color both encode information density.
 
-The core insight driving the project: compression ratio is a better proxy for true complexity than Shannon entropy. A blurred background has varied pixel values (high Shannon entropy) but compresses easily (low Kolmogorov complexity). zlib correctly identifies it as simple. Shannon does not.
-entropy_viz recursively subdivides an image into quadrants and scores each region for complexity. High-complexity regions — dense texture, fine detail, irregular structure — subdivide into smaller cells. Low-complexity regions — flat color, blurred backgrounds, repeated patterns — remain as large blocks. The result is an overlay where cell size and color both encode information density.
-
-The core insight driving the project: compression ratio is a better proxy for true complexity than Shannon entropy. A blurred background has varied pixel values (high Shannon entropy) but compresses easily (low Kolmogorov complexity). zlib correctly identifies it as simple. Shannon does not.
+The core insight driving the project: compression ratio is a better proxy for true complexity than Shannon entropy. A blurred background has varied pixel values (high Shannon entropy) but compresses easily (low Kolmogorov complexity). zlib correctly identifies it as simple. Shannon does not. Variance offers a fast middle ground — cheaper than compression but more spatially grounded than Shannon.
 
 ---
 
@@ -24,8 +20,6 @@ pip install pillow numpy
 
 Requires Python 3.7+.
 
-Requires Python 3.7+.
-
 ---
 
 ## Usage
@@ -33,24 +27,20 @@ Requires Python 3.7+.
 ### Single image
 
 ```bash
-# Compression entropy, fixed depth
-# Compression entropy, fixed depth
-python main.py photo.jpg --method compression --max-depth 6
+# Shannon entropy, default leaf size (4px)
+python main.py photo.jpg
 
-# Shannon entropy, fixed depth
-python main.py photo.jpg --method shannon --max-depth 5
+# Compression entropy, default leaf size (16px)
+python main.py photo.jpg --method compression
 
-# Adaptive splitting — stops when complexity drops below threshold
-python main.py photo.jpg --method compression --threshold 0.4
+# Variance scorer, custom leaf size
+python main.py photo.jpg --method variance --leaf-size 8
 
-# Adaptive splitting — stops when complexity drops below threshold
-python main.py photo.jpg --method compression --threshold 0.4
+# Adaptive pruning — collapse least complex 25% of leaves after full build
+python main.py photo.jpg --method compression --threshold 25
 
-# Both stopping conditions active
-python main.py photo.jpg --method compression --max-depth 6 --threshold 0.4
-
-# Save to custom path, no legend
-python main.py photo.jpg -o result.png --no-legend
+# Save to custom path, show legend and borders
+python main.py photo.jpg -o result.png --legend --borders
 ```
 
 ### Batch processing
@@ -104,22 +94,35 @@ python scatter.py results/features.csv --auto
 
 **Scoring methods**
 
-Two complexity scorers are available, both returning a normalized float in `[0, 1]`:
+Three complexity scorers are available, all returning a normalized float in `[0, 1]`:
 
-- **Shannon entropy** — measures pixel value distribution. Fast but blind to spatial repetition.
-- **Compression ratio** — compresses raw pixel bytes with zlib and measures how much they shrink. Slower but more principled — it approximates Kolmogorov complexity from above.
+- **Shannon entropy** — measures pixel value distribution across all channels as a single flattened histogram. Fast, works well at small leaf sizes.
+- **Compression ratio** — compresses raw pixel bytes with zlib and measures how much they shrink. Slower but more principled — approximates Kolmogorov complexity from above. Reliable at `leaf_size >= 16`.
+- **Variance** — computes `np.var` across pixel values. Fastest scorer. Raw values are adaptively normalized using the 99th percentile of the image's own distribution with sqrt stretching — no hardcoded constants.
 
-Both scorers accept an optional opacity mask and only score opaque pixels, so transparent regions don't corrupt the complexity measurement of boundary nodes.
+All scorers accept an optional opacity mask and only score opaque pixels, so transparent regions don't corrupt the complexity measurement of boundary nodes.
 
 **Quadtree construction**
 
-The image is recursively split into four quadrants. Splitting stops when any of the following are met:
+The image is recursively split into four quadrants using a two-pass approach:
 
-- `max_depth` is reached (fixed mode)
-- Region complexity falls below `threshold` (adaptive mode) — evaluated on opaque pixels only
-- Region complexity falls below `threshold` (adaptive mode) — evaluated on opaque pixels only
-- Region becomes smaller than `min_size` pixels
+Pass 1 — build to full depth. Splitting stops when:
+- The child would be at or below `leaf_size` pixels (resolution-independent — equivalent spatial granularity across any image size)
 - Region is >= 95% transparent (background guard)
+
+Pass 2 — percentile pruning (optional). If `--threshold` is set, leaf nodes below the Nth percentile of the image's own complexity distribution are collapsed back into their parent. This is fully content-adaptive — the cutoff is derived from the image itself, not a fixed value.
+
+**Leaf size defaults**
+
+| Method | Default leaf size | Rationale |
+|--------|-------------------|-----------|
+| `shannon` | 4px | Works accurately at fine grain |
+| `variance` | 4px | Works accurately at fine grain |
+| `compression` | 16px | zlib unreliable below ~768 bytes |
+
+**Adaptive variance normalization**
+
+When rendering an overlay with `--method variance`, the raw variance scores are rescaled using `sqrt(var / p99)` where `p99` is the 99th percentile of the image's own leaf variances. This ensures the full color range is used regardless of image content. Normalization is skipped during `--no-overlay` batch runs for speed.
 
 **Background masking**
 
@@ -127,7 +130,7 @@ For RGBA images, each node is tagged with `background_ratio` (fraction of transp
 
 **Visualization**
 
-Subject nodes are colored by complexity score: blue (low) → green → yellow → red (high). Background nodes appear as neutral grey. The output PNG preserves the original alpha channel so transparent regions remain transparent.
+Subject nodes are colored by complexity score: blue (low) → green → yellow → red (high). Background nodes appear as neutral grey. The output PNG preserves the original alpha channel so transparent regions remain transparent. Borders and legend are opt-in via `--borders` and `--legend`.
 
 **Feature extraction**
 
@@ -137,16 +140,9 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 |---------|-------------|
 | `mean_complexity` | Average complexity across subject leaf nodes |
 | `std_complexity` | Variance — low in AI images which tend toward uniform complexity |
-| `min_complexity` | Floor of complexity |
-| `max_complexity` | Ceiling of complexity |
-| `complexity_range` | max − min |
-| `mean_leaf_area` | Average subject leaf area in pixels |
-| `std_leaf_area` | Variance in leaf area |
-| `leaf_count` | Total subject leaf count |
+| `complexity_range` | max − min — spread of the distribution |
 | `mean_boundary_delta` | Average complexity jump between parent and child nodes |
-| `max_boundary_delta` | Maximum boundary jump — manipulation signal |
-| `mean_depth` | Average depth of subject leaf nodes |
-| `std_depth` | Variance in depth |
+| `leaf_count` | Total subject leaf count |
 
 ---
 
@@ -154,7 +150,7 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 
 | File | Purpose |
 |------|---------|
-| `complexity.py` | Shannon entropy and compression ratio scorers, with opacity mask support |
+| `complexity.py` | Shannon, compression, and variance scorers with opacity mask support |
 | `quadtree.py` | `QuadNode` dataclass and `QuadTree` builder with background masking |
 | `visualizer.py` | Overlay rendering, RGBA preservation, and colorbar legend |
 | `features.py` | Feature extraction and CSV export |
@@ -170,14 +166,12 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--method` | `shannon` | `shannon` or `compression` |
-| `--max-depth` | `6` | Max split depth. `0` = adaptive only |
-| `--threshold` | off | Stop splitting below this complexity score |
-| `--min-size` | `8` | Minimum region side length (pixels) |
-| `--bg-threshold` | `0.5` | Nodes with this fraction of transparent pixels are excluded from stats and shown as grey |
+| `--method` | `shannon` | `shannon`, `compression`, or `variance` |
+| `--leaf-size` | method default | Target leaf side length in pixels |
+| `--threshold` | off | Percentile (0–100) — prune least complex leaves after full build |
 | `--alpha` | `120` | Overlay opacity (0–255) |
-| `--no-borders` | off | Hide quadrant border lines |
-| `--no-legend` | off | Omit colorbar legend |
+| `--borders` | off | Show quadrant border lines |
+| `--legend` | off | Show colorbar legend |
 
 **batch.py** (includes all main.py options plus):
 
@@ -186,6 +180,7 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 | `--label` | none | Label for all images in this batch (`real`, `ai`, `photoshopped`) |
 | `--append` | off | Append to existing `features.csv` instead of overwriting |
 | `--no-overlay` | off | Skip overlay rendering, extract features only |
+| `--workers` | `1` | Number of parallel workers |
 
 **scatter.py**
 
@@ -193,8 +188,8 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 |------|---------|-------------|
 | `--x` | `mean_complexity` | Feature for the x axis |
 | `--y` | `std_complexity` | Feature for the y axis |
-| `--output` | `<csv>_scatter.png` | Output image path |
-| `--auto` | off | Generate scatter plots for all feature pair combinations |
+| `--output` | `<csv>_<x>_vs_<y>_scatter.png` | Output image path |
+| `--auto` | off | Generate scatter plots for all meaningful feature pairs |
 
 ---
 
@@ -218,8 +213,9 @@ These signatures emerge from no training data and no learned model — purely fr
 
 ## Known Limitations
 
-- **Shannon entropy** produces a noisy grid at high depth due to statistical artifacts in small blocks. Use `--method compression` or raise `--min-size` to mitigate.
-- **Compression thresholds** are not on the same scale as Shannon thresholds. Start around `0.4` for compression adaptive splitting.
+- **Shannon entropy** produces a noisy grid at high depth due to statistical artifacts in small blocks. Use `--method compression` or increase `--leaf-size` to mitigate.
+- **Compression scoring** is unreliable at `leaf_size < 16` — zlib header overhead dominates at small block sizes.
+- **Variance normalization** is per-image, so raw feature values are not directly comparable across images processed independently. The relative ordering within an image is preserved.
 - **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce elevated complexity scores if the subject content in that cell is detailed.
 - **RealVsFake** images are face-centric — results may not generalize to non-portrait subjects without further validation.
 
@@ -230,7 +226,10 @@ These signatures emerge from no training data and no learned model — purely fr
 **Near term**
 - ✅ Feature extraction: distill each quadtree into a feature vector exportable as CSV
 - ✅ Scatter plot visualization of feature separation across labeled datasets
-- Lightweight classifier: logistic regression on extracted features — no neural networks, architecture-agnostic by design
+- ✅ Variance scorer: fast alternative to compression with adaptive normalization
+- ✅ Resolution-independent splitting via leaf_size
+- ✅ Two-pass percentile pruning for content-adaptive threshold
+- Lightweight classifier: logistic regression, SVM, random forest, gradient boosting on extracted features
 
 **Medium term**
 - Merge-step delta scoring: measure the information gained at each split boundary — this is where manipulation boundaries show up most clearly
@@ -251,17 +250,8 @@ General frequency-domain analysis has shown that GAN-generated images exhibit pe
 
 ---
 
-## Related Work
-
-**Synthbuster** (2024) is the closest non-neural approach in the literature. It applies a cross-difference filter to highlight periodic artifacts in synthetic images, then extracts spectral features in the frequency domain and classifies them using gradient boosting. It targets GAN-specific upsampling artifacts — a different signal and a different domain from complexity-based analysis. Unlike Synthbuster, this project makes no assumptions about the generative architecture.
-
-General frequency-domain analysis has shown that GAN-generated images exhibit periodic spectral artifacts caused by upsampling operations. Compression-based complexity is architecture-agnostic by design and does not rely on these artifacts, which may not be present in diffusion-model outputs.
-
----
-
 ## Background
 
 The theoretical grounding for this project is Kolmogorov complexity — the length of the shortest program that produces a given output. True Kolmogorov complexity is uncomputable (proven via reduction to the halting problem), but compression ratio provides a computable upper bound. The project explores how far this approximation can take a practical detector.
 
-The spatial distribution of complexity — not just a single score — is where the signal lives. A deepfake has a specific quadtree signature: a low-variance complexity island (the generated face) surrounded by a high-delta boundary ring, embedded in naturally varying terrain. That pattern is rare in unmanipulated photographs and detectable without any knowledge of the generative model that produced it.
 The spatial distribution of complexity — not just a single score — is where the signal lives. A deepfake has a specific quadtree signature: a low-variance complexity island (the generated face) surrounded by a high-delta boundary ring, embedded in naturally varying terrain. That pattern is rare in unmanipulated photographs and detectable without any knowledge of the generative model that produced it.
