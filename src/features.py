@@ -36,14 +36,19 @@ class imageFeatures:
     leaf_count: int             # total subjet leaf count
     
     # Boundary signal, complexity delta between parent and children
-    mean_boundary_delta: float   # average |parent - child| complexity at splits
-    max_boundary_delta: float    # maximum boundary jump, manipulation signal
+    mean_boundary_delta: float  # average |parent - child| complexity at splits
+    max_boundary_delta: float   # maximum boundary jump, manipulation signal
     
     # Depth distribution
     mean_depth: float           # how deep the tree goes on average
     std_depth: float            # variance in depth
     
-    label: Optional[str] = None # "real", "ai", "photoshopped", set manually
+    # Merge-step delta, information gain at each split
+    mean_merge_delta: float     # average std(children) / (parent + eps) across all splits
+    max_merge_delta: float      # peak merge delta — highlights manipulation boundaries
+    std_merge_delta: float      # variance of merge deltas — high in real, low in AI
+    
+    label: Optional[str] = None # "real", "ai", "photoshopped" (set manually)
     
     def to_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items() if v is not None or k == "label"}
@@ -69,27 +74,37 @@ def extract_features(root: QuadNode, filename: str, label: str = None) -> imageF
     if not subject_leaves:
         subject_leaves = all_leaves
     
-    complexities = np.array([n.complexity for n in subject_leaves])
-    areas = np.array([n.w * n.h for n in subject_leaves])
-    depths = np.array([n.depth for n in subject_leaves])
+    complexities    = np.array([n.complexity    for n in subject_leaves])
+    areas           = np.array([n.w * n.h       for n in subject_leaves], dtype=float)
+    depths          = np.array([n.depth         for n in subject_leaves], dtype=float)
     
     # Boundary delta: for every internal node, measure complexity jump to children
     boundary_deltas = _compute_boundary_deltas(root)
+    merge_deltas    = _compute_merge_deltas(root)
     
     return imageFeatures(
         filename=os.path.basename(filename),
+
         mean_complexity=float(np.mean(complexities)),
         std_complexity=float(np.std(complexities)),
         min_complexity=float(np.min(complexities)),
         max_complexity=float(np.max(complexities)),
         complexity_range=float(np.max(complexities) - np.min(complexities)),
+
         mean_leaf_area=float(np.mean(areas)),
         std_leaf_area=float(np.std(areas)),
         leaf_count=len(subject_leaves),
+
         mean_boundary_delta=float(np.mean(boundary_deltas)) if len(boundary_deltas) else 0.0,
-        max_boundary_delta=float(np.max(boundary_deltas)) if len(boundary_deltas) else 0.0,
+        max_boundary_delta=float(np.max(boundary_deltas))  if len(boundary_deltas) else 0.0,
+
         mean_depth=float(np.mean(depths)),
         std_depth=float(np.std(depths)),
+
+        mean_merge_delta=float(np.mean(merge_deltas)) if len(merge_deltas) else 0.0,
+        max_merge_delta=float(np.max(merge_deltas))  if len(merge_deltas) else 0.0,
+        std_merge_delta=float(np.std(merge_deltas))  if len(merge_deltas) else 0.0,
+
         label=label,
     )
 
@@ -113,29 +128,43 @@ def _compute_boundary_deltas(root: QuadNode) -> list:
     return deltas
 
 
+def _compute_merge_deltas(root:QuadNode) -> list:
+    """
+    Compute merge-step delta for every internal subject node.
+    
+    Delta = std(child_complexities) / (parent_complexity + eps)
+    
+    This measures the information gained at each split, how much
+    heterogeneity the split revealed relative to the parent score.
+    
+    High delta: split revealed genuine internal structure (real photo signal).
+    Low delta: split revealed homogeneous subregions (AI generator singal).
+    Peak delta: manipulation boundary where generated content meets natural image.
+    """
+    EPS = 1e-6
+    deltas = []
+    queue = [root]
+    while queue:
+        node = queue.pop()
+        if not node.is_leaf:
+            subject_children = [c for c in node.children if c.background_ratio < BG_THRESHOLD]
+            if len(subject_children) >= 2:
+                child_complexities = np.array([c.complexity for c in subject_children])
+                delta = float(np.std(child_complexities) / (node.complexity + EPS))
+                deltas.append(delta)
+            queue.extend(node.children)
+    return deltas
+
+
 # CSV export
 
 FEATURE_FIELDS = [
-    "filename",
-    "label",
-    
-    "mean_complexity",
-    "std_complexity",
-    "min_complexity",
-    "max_complexity",
-    
-    "complexity_range",
-    
-    "mean_leaf_area",
-    "std_leaf_area",
-    
-    "leaf_count",
-    
-    "mean_boundary_delta",
-    "max_boundary_delta",
-    
-    "mean_depth",
-    "std_depth"
+    "filename", "label",
+    "mean_complexity", "std_complexity", "min_complexity", "max_complexity", "complexity_range",
+    "mean_leaf_area", "std_leaf_area", "leaf_count",
+    "mean_boundary_delta", "max_boundary_delta",
+    "mean_depth", "std_depth",
+    "mean_merge_delta", "max_merge_delta", "std_merge_delta",
 ]
 
 def save_csv(features_list: list, output_path: str) -> None:

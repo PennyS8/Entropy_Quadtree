@@ -5,15 +5,15 @@ Run the entropy visualizer on every image in a folder.
 Produces overlay images and a features.csv for scatter plot analysis.
 
 Usage:
-    python batch.py --input my_images --output results
+    python3 batch.py --input my_images --output results
 
     # With labels for AI detection analysis
-    python batch.py --input real_photos  --output results --label real
-    python batch.py --input ai_images    --output results --label ai          --append
-    python batch.py --input photoshopped --output results --label photoshopped --append
+    python3 batch.py --input real_photos  --output results --label real
+    python3 batch.py --input ai_images    --output results --label ai          --append
+    python3 batch.py --input photoshopped --output results --label photoshopped --append
 
     # Parallel processing
-    python batch.py --input my_images --output results --label real --workers 8
+    python3 batch.py --input my_images --output results --label real --workers 8
 
 Optional args:
     --method      shannon|compression|variance  (default: shannon)
@@ -31,6 +31,7 @@ Optional args:
 import argparse
 import csv
 import os
+import sys
 import numpy as np
 from PIL import Image
 from multiprocessing import Pool, cpu_count
@@ -210,6 +211,7 @@ def main():
     else:
         save_csv(new_features, features_path)
 
+    print('\a')
     print(f"Done. {len(new_features)} processed, {errors} errors.")
 
 

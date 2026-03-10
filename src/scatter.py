@@ -7,9 +7,9 @@ Reads a CSV produced by features.py and generates scatter plots
 showing how well complexity features separate image classes.
 
 Usage:
-    python scatter.py features.csv
-    python scatter.py features.csv --x mean_complexity --y std_complexity
-    python scatter.py features.csv --auto   # generate all feature pair plots
+    python3 scatter.py features.csv
+    python3 scatter.py features.csv --x mean_complexity --y std_complexity
+    python3 scatter.py features.csv --auto   # generate all feature pair plots
 """
 
 import argparse

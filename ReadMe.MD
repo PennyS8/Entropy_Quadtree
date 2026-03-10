@@ -157,6 +157,9 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 | `scatter.py` | Scatter plot visualization of extracted features |
 | `main.py` | Single image CLI entry point |
 | `batch.py` | Batch processing, feature extraction, and labeled dataset pipeline |
+| `classify.py` | Train and evaluate classifiers on extracted features |
+| `tune_threshold.py` | Hyperparameter tuning for the pruning threshold |
+| `tune_plots.py` | Visualization of threshold tuning results |
 
 ---
 
@@ -191,13 +194,35 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 | `--output` | `<csv>_<x>_vs_<y>_scatter.png` | Output image path |
 | `--auto` | off | Generate scatter plots for all meaningful feature pairs |
 
+**classify.py**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--test-size` | `0.2` | Fraction of data held out for testing |
+| `--features` | all | Feature columns to use |
+| `--fast` | off | Run only Logistic Regression and Random Forest |
+| `--balance` | off | Undersample majority class to balance dataset |
+| `--cv` | `5` | Number of cross-validation folds |
+
+**tune_threshold.py**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--input` | required | One or more folders of images (one per class) |
+| `--labels` | required | One label per folder, same order as `--input` |
+| `--thresholds` | `0 10 20 30 40 50 60` | Percentile values to sweep |
+| `--method` | `shannon` | Scoring method |
+| `--leaf_size` | `4` | Target leaf side length in pixels |
+| `--max_images` | off | Cap images per class — useful for fast pilot runs |
+| `--workers` | `4` | Parallel workers for image loading |
+
 ---
 
 ## Proof of Concept — AI Detection
 
 The compression quadtree produces meaningfully different signatures for real photographs and AI-generated images. Initial results on the RealVsFake dataset (81k real vs AI-generated images) show visible separation in feature space using only `mean_complexity` and `std_complexity`:
 
-![Proof of concept comparison](proof_of_concept.png)
+![Proof of concept comparison](./src/results/proof_of_concept.png)
 
 Real images cluster toward lower mean complexity and higher variance — natural photographs have regions of simple and complex content. AI-generated images cluster toward higher mean complexity and lower variance — generators produce uniformly high complexity with little internal differentiation.
 
@@ -209,6 +234,50 @@ Real images cluster toward lower mean complexity and higher variance — natural
 
 These signatures emerge from no training data and no learned model — purely from information-theoretic properties of the image content.
 
+**Classifier results (RealVsFake, 81k images)**
+
+| Method | Best model | Accuracy |
+|--------|-----------|----------|
+| Compression | Random Forest | 78.5% |
+| Shannon | Random Forest | 75.8% |
+| Variance | Random Forest | 69.6% |
+
+Compression outperforms Shannon because it captures structural repetition — AI generators produce locally coherent, repetitive textures that compress well even when they appear visually complex. The most informative features across all methods are `max_merge_delta` and `std_complexity`, which measure how much internal heterogeneity is revealed at each quadtree split. Real photographs show high variance at splits; AI images do not.
+
+**Threshold tuning**
+
+The pruning threshold is a hyperparameter that controls how aggressively low-complexity leaves are collapsed after the full tree is built. Tuning is done without trial and error using `tune_threshold.py`, which builds each quadtree once and sweeps prune cutoffs in memory — making the full sweep as fast as a single batch run.
+
+![Accuracy vs Threshold](./src/results/tune_plots.png)
+
+Key findings from threshold tuning on the RealVsFake dataset:
+
+- **Compression** is nearly flat across the full threshold range (87–88%), with a shallow peak around threshold=35. The signal is robust — the features that matter aren't concentrated in the low-complexity leaves being pruned away, so pruning neither helps nor hurts much.
+- **Shannon** peaks early at threshold=5 and declines steadily. Low-complexity leaves contribute useful signal for Shannon, so pruning them away hurts.
+- **Variance** shows the clearest rise-then-fall shape, peaking around threshold=70. Variance is most affected by noise from near-zero regions; pruning those cleanly improves the signal before the tree becomes too sparse.
+
+**Why the methods diverge — leaf count**
+
+The leaf count plot explains why the three curves behave so differently under pruning:
+
+![Leaf Count vs Threshold](./src/results/leaf_count_vs_threshold.png)
+
+Compression prunes far fewer leaves than Shannon or variance at the same threshold percentile. Its complexity values are tightly clustered — most leaves score similarly — so the bottom 35% of the distribution is only a shallow cut. Shannon and variance have wider, more spread-out distributions, so the same percentile threshold removes significantly more of the tree. This is why compression's accuracy is stable across the full range while the other two methods show a clear sensitivity to threshold choice.
+
+**Accuracy vs leaf count**
+
+Viewing accuracy as a function of tree size rather than threshold percentile reveals the true operating point of each method:
+
+![Accuracy vs Leaf Count](./src/results/accuracy_vs_leaf_count.png)
+
+Compression operates in the upper-right of this space — high accuracy at high leaf count — and barely moves as pruning increases. Variance climbs steeply from the bottom-left as pruning removes noisy near-zero leaves, then plateaus. Shannon starts high but falls away once too many informative leaves are removed. The color encoding (threshold percentile) shows that compression's best points cluster at moderate thresholds (orange/red), while variance's best points are at higher thresholds (yellow/green).
+
+**Leaf size**
+
+`leaf_size` controls the spatial resolution of the quadtree — the minimum side length in pixels at which splitting stops. It is a separate hyperparameter from threshold and affects all three methods differently. Compression has a hard lower bound of `leaf_size=16` because zlib's header overhead dominates at smaller block sizes, making compression ratios unreliable. Shannon and variance work accurately at `leaf_size=4` — a 4px block contains enough pixels for a meaningful entropy or variance calculation, whereas a 1×1 pixel leaf has no relative complexity to measure. Increasing leaf size reduces tree depth and leaf count uniformly, which decreases feature resolution but speeds up both build time and classification. The defaults are chosen to be the smallest reliable value for each method.
+
+**Recommended configuration:** `--method compression --threshold 35`, giving ~88.5% accuracy on the RealVsFake dataset.
+
 ---
 
 ## Known Limitations
@@ -218,6 +287,7 @@ These signatures emerge from no training data and no learned model — purely fr
 - **Variance normalization** is per-image, so raw feature values are not directly comparable across images processed independently. The relative ordering within an image is preserved.
 - **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce elevated complexity scores if the subject content in that cell is detailed.
 - **RealVsFake** images are face-centric — results may not generalize to non-portrait subjects without further validation.
+- **Fixed-grid trees** — without `--threshold`, all trees terminate at exactly `leaf_size`, producing a constant `leaf_count` and `mean_depth` across all images. These features carry no information unless adaptive pruning is enabled.
 
 ---
 
@@ -229,7 +299,8 @@ These signatures emerge from no training data and no learned model — purely fr
 - ✅ Variance scorer: fast alternative to compression with adaptive normalization
 - ✅ Resolution-independent splitting via leaf_size
 - ✅ Two-pass percentile pruning for content-adaptive threshold
-- Lightweight classifier: logistic regression, SVM, random forest, gradient boosting on extracted features
+- ✅ Lightweight classifier: logistic regression, SVM, random forest, gradient boosting on extracted features
+- ✅ Threshold hyperparameter tuning without trial and error
 
 **Medium term**
 - Merge-step delta scoring: measure the information gained at each split boundary — this is where manipulation boundaries show up most clearly

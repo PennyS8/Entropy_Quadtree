@@ -5,11 +5,11 @@ CLI entry point for the entropy visualizer. Processes a single image and
 saves an overlay PNG showing the quadtree complexity map.
 
 Usage:
-    python main.py photo.jpg
-    python main.py photo.jpg --method compression
-    python main.py photo.jpg --method shannon --leaf-size 4
-    python main.py photo.jpg --method compression --threshold 0.05
-    python main.py photo.jpg -o result.png --no-legend --no-borders
+    python3 main.py photo.jpg
+    python3 main.py photo.jpg --method compression
+    python3 main.py photo.jpg --method shannon --leaf-size 4
+    python3 main.py photo.jpg --method compression --threshold 0.05
+    python3 main.py photo.jpg -o result.png --no-legend --no-borders
 
 Optional args:
     --method      shannon|compression|variance (default: shannon)
