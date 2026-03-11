@@ -1,8 +1,23 @@
 """
 tune_plots.py
 
-Learning to utilize matplotlib to create plots based on the
-/results/tune_results_*.py files.
+Generate threshold tuning visualizations from tune_threshold.py CSV output.
+Reads results/tune_threshold/tune_results_{method}.csv and produces three plots:
+
+    1. accuracy_vs_threshold   — CV accuracy vs pruning percentile, with
+                                 confidence bands and best-point markers
+    2. leaf_count_vs_threshold — mean subject leaf count vs threshold, showing
+                                 how aggressively each method prunes the tree
+    3. accuracy_vs_leaf_count  — accuracy vs tree size, dots coloured by
+                                 threshold percentile via plasma colormap
+
+Usage:
+    python3 tune_plots.py
+
+Output:
+    results/tune_threshold/tune_plots.png
+    results/tune_threshold/leaf_count_vs_threshold.png
+    results/tune_threshold/accuracy_vs_leaf_count.png
 """
 
 import matplotlib.pyplot as plt
@@ -25,7 +40,7 @@ def accuracy_vs_threshold():
     COLORS = ["steelblue", "tomato", "mediumseagreen"]
     
     for method, color in zip(METHODS, COLORS):
-        path = "./results/tune_results_" + method + ".csv"
+        path = "./results/tune_threshold/tune_results_" + method + ".csv"
         with open(path, mode="r") as f:
             rows = list(csv.DictReader(f))
     
@@ -52,7 +67,7 @@ def accuracy_vs_threshold():
     ax.set_title("Accuracy vs Threshold")
     ax.legend(facecolor="#222", labelcolor="white", edgecolor="#444")
     
-    plt.savefig("./results/tune_plots.png", dpi=150, bbox_inches="tight", facecolor="#111")
+    plt.savefig("./results/tune_threshold/tune_plots.png", dpi=150, bbox_inches="tight", facecolor="#111")
 
 
 def leaf_count_vs_threshold():
@@ -70,7 +85,7 @@ def leaf_count_vs_threshold():
     COLORS  = ["steelblue", "tomato", "mediumseagreen"]
 
     for method, color in zip(METHODS, COLORS):
-        path = "./results/tune_results_" + method + ".csv"
+        path = "./results/tune_threshold/tune_results_" + method + ".csv"
         with open(path, mode="r") as f:
             rows = list(csv.DictReader(f))
 
@@ -91,7 +106,7 @@ def leaf_count_vs_threshold():
     ax.set_title("Leaf Count vs Threshold")
     ax.legend(facecolor="#222", labelcolor="white", edgecolor="#444")
 
-    plt.savefig("./results/leaf_count_vs_threshold.png", dpi=150, bbox_inches="tight", facecolor="#111")
+    plt.savefig("./results/tune_threshold/leaf_count_vs_threshold.png", dpi=150, bbox_inches="tight", facecolor="#111")
 
 
 def accuracy_vs_leaf_count():
@@ -109,7 +124,7 @@ def accuracy_vs_leaf_count():
     COLORS  = ["steelblue", "tomato", "mediumseagreen"]
 
     for method, color in zip(METHODS, COLORS):
-        path = "./results/tune_results_" + method + ".csv"
+        path = "./results/tune_threshold/tune_results_" + method + ".csv"
         with open(path, mode="r") as f:
             rows = list(csv.DictReader(f))
 
@@ -138,7 +153,7 @@ def accuracy_vs_leaf_count():
     ax.set_title("Accuracy vs Leaf Count")
     ax.legend(facecolor="#222", labelcolor="white", edgecolor="#444")
 
-    plt.savefig("./results/accuracy_vs_leaf_count.png", dpi=150, bbox_inches="tight", facecolor="#111")
+    plt.savefig("./results/tune_threshold/accuracy_vs_leaf_count.png", dpi=150, bbox_inches="tight", facecolor="#111")
 
 
 def main():

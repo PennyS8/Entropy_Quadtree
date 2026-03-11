@@ -62,6 +62,9 @@ CLASSIFIERS_FAST = {
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate classifiers on quadtree features.")
     parser.add_argument("csv", help="Path to features.csv produced by batch.py")
+    parser.add_argument("--output", default=None,
+                        help="Path to save results text file. Defaults to classify_results.txt "
+                             "alongside the CSV.")
     parser.add_argument("--test-size", type=float, default=0.2,
                         help="Fraction of data to use for testing (default: 0.2)")
     parser.add_argument("--features", nargs="+", default=FEATURE_COLS,
@@ -247,7 +250,7 @@ def main():
         print(f"accuracy={acc:.4f}")
         all_lines.append(report)
         results.append((name, acc))
-
+    
     # Summary ranking
     all_lines.append(f"\n{'='*60}")
     all_lines.append("  SUMMARY (by accuracy)")
@@ -255,11 +258,15 @@ def main():
     for name, acc in sorted(results, key=lambda x: -x[1]):
         bar = "█" * int(acc * 40)
         all_lines.append(f"  {name:<25} {acc:.4f}  {bar}")
-
+    
     report_text = "\n".join(all_lines)
     print(report_text)
-
-    out_path = os.path.join(os.path.dirname(args.csv), "classify_results.txt")
+    
+    if args.output:
+        out_path = args.output
+    else:
+        out_path = os.path.join(os.path.dirname(args.csv), "classify_results.txt")
+    
     with open(out_path, "w") as f:
         f.write(report_text)
     print(f"\nSaved: {out_path}")

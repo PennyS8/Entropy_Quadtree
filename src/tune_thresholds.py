@@ -6,48 +6,52 @@ Tune the quadtree pruning threshold hyperparameter without trial and error.
 Strategy:
     Build each image's quadtree ONCE, then apply different prune cutoffs
     in memory and re-extract features at each threshold value. This avoids
-    rebuilding the tree repeatedly and makes the sweep fast.
+    rebuilding the tree repeatedly and makes the full sweep as fast as a
+    single batch run.
 
-    For each threshold value, a RandomForest classifier is cross-validated
-    on the resulting feature set. The threshold that maximises mean CV
-    accuracy is reported as optimal.
+    For each threshold value a RandomForest is cross-validated on the
+    resulting feature set. The threshold that maximises mean CV accuracy
+    is reported as optimal along with a ready-to-run batch.py command.
 
 Usage:
-    # Basic sweep over default threshold range (0, 10, 20 ... 60)
-    python tune_threshold.py --input real_photos ai_images --labels real ai
+    # Coarse sweep over the full range
+    python3 tune_threshold.py --input real_photos ai_images --labels real ai
 
-    # Custom threshold range
-    python tune_threshold.py --input real_photos ai_images --labels real ai \
-        --thresholds 0 5 10 15 20 25 30 35 40 45 50
-
-    # Different scoring method
-    python tune_threshold.py --input real_photos ai_images --labels real ai \
+    # Recommended starting config for compression
+    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
         --method compression --leaf_size 16
 
-    # Save results to CSV for plotting
-    python tune_threshold.py --input real_photos ai_images --labels real ai \
-        --output tune_results.csv
+    # Custom threshold range
+    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
+        --thresholds 0 5 10 15 20 25 30 35 40 45 50
 
-    # Limit images per class for a fast pilot sweep
-    python tune_threshold.py --input real_photos ai_images --labels real ai \
+    # Fast pilot run — cap images per class before committing to the full set
+    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
         --max_images 200
+
+    # Refine around a known peak without rerunning the full range
+    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
+        --method compression --thresholds 28 30 32 34 35 36 38 40 --append
 
 Required args:
     --input     one or more folders of images (one per class)
-    --labels    one label per folder (same order as --input)
+    --labels    one label per folder, same order as --input
 
 Optional args:
-    --thresholds    list of percentile values to sweep (default: 0 10 20 30 40 50 60)
+    --thresholds    percentile values to sweep (default: 0 10 20 30 40 50 60)
     --method        shannon|compression|variance (default: shannon)
-    --leaf_size     int (default: 4)
+    --leaf_size     int (default: 4; use 16 for compression)
     --cv            cross-validation folds (default: 5)
     --workers       parallel image loading workers (default: 4)
     --max_images    cap images per class — useful for fast pilot runs
-    --output        path to save results CSV (default: tune_results.csv)
+    --output        base output CSV path (default: tune_results.csv)
+                    actual file is written as tune_results_{method}.csv
+    --append        merge new threshold values into the existing CSV instead
+                    of overwriting. duplicate thresholds are replaced by the
+                    new run (last write wins).
 """
 
 import argparse
-import copy
 import csv
 import os
 import sys
@@ -62,7 +66,6 @@ from features import extract_features
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold, cross_val_score
-from sklearn.preprocessing import StandardScaler
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
 
@@ -208,24 +211,26 @@ def leaf_stats(built_trees, threshold_pct):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Tune quadtree pruning threshold.")
-    parser.add_argument("--input",   nargs="+", required=True,
+    parser.add_argument("--input", nargs="+", required=True,
                         help="Input folders (one per class)")
-    parser.add_argument("--labels",  nargs="+", required=True,
+    parser.add_argument("--labels", nargs="+", required=True,
                         help="Labels for each folder (same order as --input)")
     parser.add_argument("--thresholds", nargs="+", type=float,
                         default=[0, 10, 20, 30, 40, 50, 60],
                         help="Percentile thresholds to sweep (default: 0 10 20 30 40 50 60)")
-    parser.add_argument("--method",  choices=["shannon", "compression", "variance"],
+    parser.add_argument("--method", choices=["shannon", "compression", "variance"],
                         default="shannon")
     parser.add_argument("--leaf_size", type=int, default=4)
-    parser.add_argument("--cv",      type=int, default=5,
+    parser.add_argument("--cv", type=int, default=5,
                         help="Cross-validation folds (default: 5)")
     parser.add_argument("--workers", type=int, default=min(4, cpu_count()),
                         help="Parallel workers for image loading (default: 4)")
     parser.add_argument("--max_images", type=int, default=None,
                         help="Max images per class (for fast pilot runs)")
-    parser.add_argument("--output",  default="tune_results.csv",
+    parser.add_argument("--output", default="tune_results.csv",
                         help="Output CSV path (default: tune_results.csv)")
+    parser.add_argument("--append", action="store_true",
+                        help="Append to existing features.csv instead of overwriting")
     return parser.parse_args()
 
 
@@ -345,11 +350,26 @@ def main():
     print(f"      --threshold {best_threshold}")
 
     # ── Save results ──────────────────────────────────────────────────────────
-    with open(args.output, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(results[0].keys()))
-        writer.writeheader()
-        writer.writerows(results)
-    print(f"\nResults saved: {args.output}")
+    fieldnames = list(results[0].keys())
+    if args.append and os.path.exists(args.output):
+        # Load existing rows, index by threshold so new run overwrites duplicates
+        with open(args.output, newline="") as f:
+            existing = list(csv.DictReader(f))
+        merged = {float(r["threshold"]): r for r in existing}
+        for r in results:
+            merged[r["threshold"]] = r # new run wins on duplicated
+        merged_rows = sorted(merged.values(), key=lambda r: float(r["threshold"]))
+        with open(args.output, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(merged_rows)
+        print(f"\nAppended {len(results)} entries -> {args.output} ({len(merged_rows)} total)")
+    else:
+        with open(args.output, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(results[0].keys()))
+            writer.writeheader()
+            writer.writerows(results)
+        print(f"\nResults saved: {args.output}")
 
 
 if __name__ == "__main__":

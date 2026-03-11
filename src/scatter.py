@@ -9,14 +9,20 @@ showing how well complexity features separate image classes.
 Usage:
     python3 scatter.py features.csv
     python3 scatter.py features.csv --x mean_complexity --y std_complexity
-    python3 scatter.py features.csv --auto   # generate all feature pair plots
+    python3 scatter.py features.csv --auto # generate all feature pair plots
+    python3 scatter.py features.csv --auto --output results/scatter/
+
+Output:
+    Single plot:    <o>/scatter_<method>.png (or scatter_<method>.png alongside CSV)
+    --auto:         <o>/<x>_vs_<y>.png         (or scatter_plots_<method>/<x>_vs_<y>.png)
+
 """
 
 import argparse
 import csv
 import os
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from features import FEATURE_FIELDS
 
@@ -31,6 +37,10 @@ LABEL_COLORS = {
 
 NUMERIC_FEATURES = [f for f in FEATURE_FIELDS if f not in ("filename", "label", "leaf_count")]
 
+# Pruned feature pairs — drop mirrors, x_vs_x, dead features,
+# and pairs that are known to be redundant from analysis
+DEAD = {"max_complexity", "mean_leaf_area", "std_leaf_area", "mean_depth", "std_depth", "leaf_count"}
+        
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Scatter plot of image complexity features.")
@@ -40,9 +50,13 @@ def parse_args():
     parser.add_argument("--y", default="std_complexity",
                         help=f"Y axis feature (default: std_complexity)")
     parser.add_argument("--output", default=None,
-                        help="Output image path (default: <csv>_scatter.png)")
+                        help="Output folder for plot(s). Defaults to alongside the CSV "
+                             "for single plots, or scatter_plots_<method>/ for --auto.")
     parser.add_argument("--auto", action="store_true",
                         help="Generate scatter plots for all feature pairs")
+    parser.add_argument("--corr-threshold", type=float, default=0.9,
+                        help="Skip pairs whose Pearson |r| exceeds this value (default 0.9). "
+                        "Lower = more aggressive pruning. Only applies to --auto.")
     return parser.parse_args()
 
 
@@ -57,6 +71,27 @@ def load_data(csv_path: str) -> list:
             except (ValueError, KeyError):
                 row[field] = 0.0
     return rows
+
+
+def filter_correlated_pairs(pairs: list, rows: list, threshold: float) -> tuple:
+    """
+    Remove pairs where |Pearson r| >= threshold.
+    Returns (kept_pairs, skipped_pairs)
+    """
+    kept, skipped = [], []
+    for x_field, y_field in pairs:
+        x_vals = np.array([r[x_field] for r in rows], dtype=float)
+        y_vals = np.array([r[y_field] for r in rows], dtype=float)
+        # Pearson r: guard against zero-variance columns
+        if x_vals.std() == 0 or y_vals.std() == 0:
+            skipped.append((x_field, y_field, 1.0))
+            continue
+        r = float(np.corrcoef(x_vals, y_vals, 1.0)[0, 1])
+        if abs(r) >= threshold:
+            skipped.append((x_field, y_field, r))
+        else:
+            kept.append((x_field, y_field))
+    return kept, skipped
 
 
 def render_scatter(
@@ -123,9 +158,6 @@ def render_scatter(
         label = row.get("label", "").strip() or None
         color = LABEL_COLORS.get(label, LABEL_COLORS[None])
         draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color)
-        # Filename label on hover not possible in PIL — show truncated name
-        # name = row.get("filename", "")[:12]
-        # draw.text((x + radius + 2, y - 6), name, fill=(180, 180, 180))
 
     # Legend — only show labels present in the data
     present_labels = sorted({row.get("label", "").strip() for row in rows} - {"", None})
@@ -147,36 +179,43 @@ def render_scatter(
 def main():
     args = parse_args()
     rows = load_data(args.csv)
-
+    
     if not rows:
         print("No data found in CSV.")
         return
-
-    base = args.csv.rsplit(".", 1)[0]
-
+    
+    csv_stem = os.path.splitext(os.path.basename(args.csv))[0]
+    csv_stem = csv_stem.removeprefix("features_") # features_shannon -> shannon
+    csv_dir  = os.path.dirname(args.csv)
+    
     if args.auto:
-        # Pruned feature pairs — drop mirrors, x_vs_x, dead features,
-        # and pairs that are known to be redundant from analysis
-        DEAD = {"mean_leaf_area", "std_leaf_area", "min_complexity",
-                "max_complexity", "mean_depth", "std_depth", "max_boundary_delta"}
-
         useful = [f for f in NUMERIC_FEATURES if f not in DEAD]
-
+        
         # Upper triangle only (no mirrors, no x_vs_x)
         pairs = [(useful[i], useful[j])
                  for i in range(len(useful))
                  for j in range(i + 1, len(useful))]
-
-        os.makedirs(f"{base}_scatter_plots", exist_ok=True)
-        print(f"Generating {len(pairs)} plots (pruned from {len(NUMERIC_FEATURES)*(len(NUMERIC_FEATURES)-1)//2} total pairs)")
+        
+        pairs, skipped = filter_correlated_pairs(pairs, rows, args.corr_threshold)
+        
+        if skipped:
+            print(f"Skipped {len(skipped)} correlated pairs (|r| >= {args.corr_threshold}):")
+            for x_field, y_field, r in skipped:
+                print(f"  {x_field} vs {y_field}  r={r:+.3f}")
+        
+        out_dir = args.output or os.path.join(csv_dir, f"scatter_{csv_stem}")
+        os.makedirs(out_dir, exist_ok=True)
+        print(f"Generating {len(pairs)} plots -> {out_dir}/")
         for x_field, y_field in pairs:
             img = render_scatter(rows, x_field, y_field)
-            out = f"{base}_scatter_plots/{x_field}_vs_{y_field}.png"
+            out = os.path.join(out_dir, f"{x_field}_vs_{y_field}.png")
             img.save(out)
-            print(f"Saved: {out}")
+            print(f"\t {x_field} vs {y_field}")
     else:
         img = render_scatter(rows, args.x, args.y)
-        out = args.output or f"{base}_scatter.png"
+        out_dir = args.output or csv_dir
+        os.makedirs(out_dir, exist_ok=True)
+        out = os.path.join(out_dir, f"scatter_{csv_stem}.png")
         img.save(out)
         print(f"Saved: {out}")
         img.show()

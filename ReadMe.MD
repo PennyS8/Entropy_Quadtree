@@ -45,32 +45,27 @@ python main.py photo.jpg -o result.png --legend --borders
 
 ### Batch processing
 
-Run across a folder of images, producing overlay PNGs and a `features.csv`:
+Run across one or more folders of images, producing overlay PNGs and a `features.csv`:
 
 ```bash
-python batch.py --input my_images/ --output results/ --label real
-```
+# Multiple folders in one run — builds a labeled dataset in a single pass
+python3 batch.py --input real_photos/ ai_images/ --labels real ai --output results/
 
-To build a labeled dataset across multiple folders, use `--append` to accumulate into the same CSV:
+# Skip overlay rendering, extract features only (much faster)
+python3 batch.py --input real_photos/ ai_images/ --labels real ai --output results/ --no-overlay
 
-```bash
-python batch.py --input real_photos/  --output results/ --label real
-python batch.py --input ai_images/    --output results/ --label ai          --append
-python batch.py --input photoshopped/ --output results/ --label photoshopped --append
-```
-
-To extract features only without rendering an overlay image per input:
-
-```bash
-python batch.py --input my_images/ --output results/ --label real --no-overlay
+# Append a new class to an existing features.csv
+python3 batch.py --input photoshopped/ --labels photoshopped --output results/ --append
 ```
 
 ### RealVsFake dataset (wish096)
 
 ```bash
-python3 batch.py --input "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Real" --output results/ --label real --no-overlay --workers 8
-
-python3 batch.py --input "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Fake" --output results/ --label ai --append --no-overlay --workers 8
+python3 batch.py \
+    --input "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Real" \
+            "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Fake" \
+    --labels real ai \
+    --output results/ --no-overlay --workers 8 --method compression --threshold 11
 ```
 
 ### Scatter plot
@@ -79,13 +74,16 @@ Visualize how well complexity features separate image classes:
 
 ```bash
 # Default: mean_complexity vs std_complexity
-python scatter.py results/features.csv
+python3 scatter.py results/features_compression.csv
 
 # Specify axes
-python scatter.py results/features.csv --x mean_boundary_delta --y std_complexity
+python3 scatter.py results/features_compression.csv --x mean_boundary_delta --y std_complexity
 
-# Generate plots for all meaningful feature pairs (pruned)
-python scatter.py results/features.csv --auto
+# Generate all useful feature pair plots, skipping highly correlated pairs
+python3 scatter.py results/features_compression.csv --auto --output results/scatter/
+
+# Stricter correlation pruning
+python3 scatter.py results/features_compression.csv --auto --corr-threshold 0.85
 ```
 
 ---
@@ -180,7 +178,8 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--label` | none | Label for all images in this batch (`real`, `ai`, `photoshopped`) |
+| `--input` | required | One or more input folders of images |
+| `--labels` | required | One label per folder, same order as `--input` |
 | `--append` | off | Append to existing `features.csv` instead of overwriting |
 | `--no-overlay` | off | Skip overlay rendering, extract features only |
 | `--workers` | `1` | Number of parallel workers |
@@ -191,13 +190,15 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 |------|---------|-------------|
 | `--x` | `mean_complexity` | Feature for the x axis |
 | `--y` | `std_complexity` | Feature for the y axis |
-| `--output` | `<csv>_<x>_vs_<y>_scatter.png` | Output image path |
-| `--auto` | off | Generate scatter plots for all meaningful feature pairs |
+| `--output` | alongside CSV | Output folder for plot(s) |
+| `--auto` | off | Generate scatter plots for all useful feature pairs |
+| `--corr-threshold` | `0.9` | Skip pairs with Pearson \|r\| above this value (only with `--auto`) |
 
 **classify.py**
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--output` | alongside CSV | Path to save results text file |
 | `--test-size` | `0.2` | Fraction of data held out for testing |
 | `--features` | all | Feature columns to use |
 | `--fast` | off | Run only Logistic Regression and Random Forest |
@@ -215,6 +216,8 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 | `--leaf_size` | `4` | Target leaf side length in pixels |
 | `--max_images` | off | Cap images per class — useful for fast pilot runs |
 | `--workers` | `4` | Parallel workers for image loading |
+| `--output` | `tune_results.csv` | Base output path — written as `tune_results_{method}.csv` |
+| `--append` | off | Merge new threshold values into existing CSV instead of overwriting |
 
 ---
 
@@ -234,15 +237,25 @@ Real images cluster toward lower mean complexity and higher variance — natural
 
 These signatures emerge from no training data and no learned model — purely from information-theoretic properties of the image content.
 
-**Classifier results (RealVsFake, 81k images)**
+**Classifier results (RealVsFake, 161,972 images, Random Forest)**
 
-| Method | Best model | Accuracy |
-|--------|-----------|----------|
-| Compression | Random Forest | 78.5% |
-| Shannon | Random Forest | 75.8% |
-| Variance | Random Forest | 69.6% |
+All runs used `--balance` to equalize class counts. Thresholds are the per-method optima identified by `tune_threshold.py`.
 
-Compression outperforms Shannon because it captures structural repetition — AI generators produce locally coherent, repetitive textures that compress well even when they appear visually complex. The most informative features across all methods are `max_merge_delta` and `std_complexity`, which measure how much internal heterogeneity is revealed at each quadtree split. Real photographs show high variance at splits; AI images do not.
+| Method | Threshold | Test accuracy | CV score |
+|--------|-----------|--------------|----------|
+| Compression | 11 | **90.1%** | 88.0% ± 0.3% |
+| Shannon | 13 | 89.0% | 86.9% ± 0.2% |
+| Variance | 71 | 85.0% | 82.6% ± 0.1% |
+
+Compression is the clear winner. The ~2% gap between test accuracy and CV score is consistent across all three methods, indicating mild but uniform overfitting — not a red flag.
+
+**Linear models** (Logistic Regression, Linear SVM) score 70–75% on compression and shannon but collapse to ~59% on variance. Variance's signal is real but highly non-linear — the Random Forest finds it, linear separators cannot. Compression and shannon do not have this problem.
+
+**`max_complexity`** scores exactly 0.0000 importance in the compression Random Forest — every image has at least one fully complex leaf, so the value is always 1.0 and carries no information. It is a safe feature to drop for compression runs.
+
+**Merge delta features** (`mean_merge_delta`, `max_merge_delta`, `std_merge_delta`) are consistently useful across all three methods and all model types. They are the most method-agnostic signal in the feature set — measuring how much internal heterogeneity is revealed at each quadtree split. Real photographs show high variance at splits; AI images do not.
+
+**`min_complexity`** is the dominant feature in variance (37.5% importance in Gradient Boosting) but ranks lower in compression and shannon. Variance scores can reach true zero on flat regions, making the minimum a strong discriminator. Compression and shannon scores compress toward a narrow range where the minimum is less distinctive.
 
 **Threshold tuning**
 
@@ -276,7 +289,7 @@ Compression operates in the upper-right of this space — high accuracy at high 
 
 `leaf_size` controls the spatial resolution of the quadtree — the minimum side length in pixels at which splitting stops. It is a separate hyperparameter from threshold and affects all three methods differently. Compression has a hard lower bound of `leaf_size=16` because zlib's header overhead dominates at smaller block sizes, making compression ratios unreliable. Shannon and variance work accurately at `leaf_size=4` — a 4px block contains enough pixels for a meaningful entropy or variance calculation, whereas a 1×1 pixel leaf has no relative complexity to measure. Increasing leaf size reduces tree depth and leaf count uniformly, which decreases feature resolution but speeds up both build time and classification. The defaults are chosen to be the smallest reliable value for each method.
 
-**Recommended configuration:** `--method compression --threshold 35`, giving ~88.5% accuracy on the RealVsFake dataset.
+**Recommended configuration:** `--method compression --threshold 11`, giving **90.1% test accuracy** on the RealVsFake dataset.
 
 ---
 
@@ -288,6 +301,7 @@ Compression operates in the upper-right of this space — high accuracy at high 
 - **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce elevated complexity scores if the subject content in that cell is detailed.
 - **RealVsFake** images are face-centric — results may not generalize to non-portrait subjects without further validation.
 - **Fixed-grid trees** — without `--threshold`, all trees terminate at exactly `leaf_size`, producing a constant `leaf_count` and `mean_depth` across all images. These features carry no information unless adaptive pruning is enabled.
+- **`max_complexity`** is always 1.0 for compression runs and contributes zero importance — safe to drop via `--features` when using `--method compression`.
 
 ---
 
@@ -296,15 +310,17 @@ Compression operates in the upper-right of this space — high accuracy at high 
 **Near term**
 - ✅ Feature extraction: distill each quadtree into a feature vector exportable as CSV
 - ✅ Scatter plot visualization of feature separation across labeled datasets
+- ✅ Correlation-based pair pruning in scatter --auto to eliminate redundant plots
 - ✅ Variance scorer: fast alternative to compression with adaptive normalization
 - ✅ Resolution-independent splitting via leaf_size
 - ✅ Two-pass percentile pruning for content-adaptive threshold
 - ✅ Lightweight classifier: logistic regression, SVM, random forest, gradient boosting on extracted features
-- ✅ Threshold hyperparameter tuning without trial and error
 
 **Medium term**
-- Merge-step delta scoring: measure the information gained at each split boundary — this is where manipulation boundaries show up most clearly
+- ✅ Threshold hyperparameter tuning without trial and error
+- ✅ Full classifier evaluation on RealVsFake 161k dataset — compression RF achieves 90.1%
 - Expand dataset: test against FFHQ (real) vs StyleGAN / Stable Diffusion outputs
+- Drop `max_complexity` from compression feature set and re-evaluate
 
 **Longer term**
 - Video pipeline: extract frames, build a complexity tensor across time, measure temporal stability of face-region complexity
