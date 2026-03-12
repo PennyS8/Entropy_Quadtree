@@ -1,0 +1,199 @@
+Classification Report (full mode)
+CSV: results/features_compression.csv
+Features: ['mean_complexity', 'std_complexity', 'min_complexity', 'max_complexity', 'complexity_range', 'mean_leaf_area', 'std_leaf_area', 'leaf_count', 'mean_boundary_delta', 'max_boundary_delta', 'mean_depth', 'std_depth', 'mean_merge_delta', 'max_merge_delta', 'std_merge_delta', 'merge_delta_bin_0', 'merge_delta_bin_1', 'merge_delta_bin_2', 'merge_delta_bin_3', 'merge_delta_bin_4', 'merge_delta_bin_5', 'merge_delta_bin_6', 'merge_delta_bin_7']
+Train/test split: 80% / 20%
+Balanced: True
+
+Outlier Detection (3*IQR beyond 1st/99th percentile)
+  'Feature'                   'Mean'    'Std'    'Min'    'Max' 'Outliers'
+ ---------------------------------------------------------------------------
+  mean_complexity             0.8272   0.0865   0.3199   0.9914          0
+  std_complexity              0.1908   0.0647   0.0376   0.4216          0
+  min_complexity              0.2155   0.1372   0.0058   0.7037          0
+  max_complexity              1.0000   0.0000   1.0000   1.0000          0
+  complexity_range            0.7845   0.1372   0.2963   0.9942          0
+  mean_leaf_area             65.9163   0.7793  64.4564  70.8969          0
+  std_leaf_area              37.9735   6.2893  28.7705 165.8861          0
+  leaf_count                1356.4676  15.8852 1261.0000 1387.0000          0
+  mean_boundary_delta         0.1001   0.0138   0.0227   0.1670          0
+  max_boundary_delta          0.4403   0.0448   0.2077   0.7167          0
+  mean_depth                  5.3481   0.0026   5.3130   5.3549          0
+  std_depth                   0.4907   0.0069   0.4692   0.5185          0
+  mean_merge_delta            0.1047   0.0447   0.0141   0.4223          0
+  max_merge_delta             0.5647   0.2536   0.1278   1.6751          0
+  std_merge_delta             0.1021   0.0475   0.0258   0.3564          0
+  merge_delta_bin_0           0.1817   0.0783   0.0000   0.7379          0
+  merge_delta_bin_1           0.0471   0.0203   0.0000   0.2237          0
+  merge_delta_bin_2           0.1288   0.0418   0.0000   0.3356          0
+  merge_delta_bin_3           0.2556   0.0550   0.0308   0.4577          0
+  merge_delta_bin_4           0.2546   0.0699   0.0110   0.5553          0
+  merge_delta_bin_5           0.1063   0.0694   0.0000   0.5220          0
+  merge_delta_bin_6           0.0249   0.0441   0.0000   0.3961          0
+  merge_delta_bin_7           0.0009   0.0038   0.0000   0.1174          3
+Total outlier rows removed: 3 / 161972 (0.00%)
+
+============================================================
+  Logistic Regression
+============================================================
+  Accuracy:  0.7544
+  Precision: 0.7571  (weighted)
+  Recall:    0.7544  (weighted)
+  F1:        0.7537  (weighted)
+  CV (5-fold): 0.7521 ± 0.0011
+
+  Confusion matrix:
+          ai  real  ← predicted
+    ai 13054  3140
+  real  4815 11379
+
+  Coefficients:
+    [ai]
+      mean_complexity           +1.7053
+      std_complexity            -0.8008
+      min_complexity            -0.2629
+      max_complexity            +0.0000
+      complexity_range          +0.2629
+      mean_leaf_area            -0.3182
+      std_leaf_area             +0.0142
+      leaf_count                -0.3229
+      mean_boundary_delta       -0.7556
+      max_boundary_delta        +0.1596
+      mean_depth                +0.0072
+      std_depth                 -0.1088
+      mean_merge_delta          +3.4211
+      max_merge_delta           +0.5476
+      std_merge_delta           +1.0532
+      merge_delta_bin_0         -0.0579
+      merge_delta_bin_1         +0.2219
+      merge_delta_bin_2         +0.3377
+      merge_delta_bin_3         +0.2743
+      merge_delta_bin_4         +0.5476
+      merge_delta_bin_5         -0.1277
+      merge_delta_bin_6         -1.2938
+      merge_delta_bin_7         -0.2870
+
+============================================================
+  Linear SVM
+============================================================
+  Accuracy:  0.7542
+  Precision: 0.7580  (weighted)
+  Recall:    0.7542  (weighted)
+  F1:        0.7533  (weighted)
+  CV (5-fold): 0.7520 ± 0.0012
+
+  Confusion matrix:
+          ai  real  ← predicted
+    ai 13193  3001
+  real  4959 11235
+
+  Coefficients:
+    [ai]
+      mean_complexity           +0.6273
+      std_complexity            -0.3228
+      min_complexity            -0.1184
+      max_complexity            +0.0000
+      complexity_range          +0.1184
+      mean_leaf_area            -1.5746
+      std_leaf_area             -0.0785
+      leaf_count                -1.8988
+      mean_boundary_delta       -0.3125
+      max_boundary_delta        +0.0595
+      mean_depth                +0.1050
+      std_depth                 -0.2878
+      mean_merge_delta          +1.1373
+      max_merge_delta           +0.1802
+      std_merge_delta           +0.4221
+      merge_delta_bin_0         -0.0717
+      merge_delta_bin_1         +0.0760
+      merge_delta_bin_2         +0.1110
+      merge_delta_bin_3         +0.0907
+      merge_delta_bin_4         +0.2059
+      merge_delta_bin_5         -0.0063
+      merge_delta_bin_6         -0.4301
+      merge_delta_bin_7         -0.1044
+
+============================================================
+  Random Forest
+============================================================
+  Accuracy:  0.9005
+  Precision: 0.9019  (weighted)
+  Recall:    0.9005  (weighted)
+  F1:        0.9004  (weighted)
+  CV (5-fold): 0.8838 ± 0.0019
+
+  Confusion matrix:
+          ai  real  ← predicted
+    ai 15058  1136
+  real  2086 14108
+
+  Feature importances:
+    min_complexity            0.0874  ███
+    complexity_range          0.0866  ███
+    max_merge_delta           0.0775  ███
+    std_complexity            0.0650  ██
+    mean_complexity           0.0548  ██
+    std_merge_delta           0.0545  ██
+    mean_merge_delta          0.0534  ██
+    max_boundary_delta        0.0490  █
+    mean_boundary_delta       0.0482  █
+    merge_delta_bin_0         0.0458  █
+    merge_delta_bin_5         0.0445  █
+    merge_delta_bin_3         0.0418  █
+    merge_delta_bin_4         0.0406  █
+    merge_delta_bin_2         0.0392  █
+    merge_delta_bin_6         0.0368  █
+    merge_delta_bin_1         0.0360  █
+    std_leaf_area             0.0326  █
+    mean_depth                0.0326  █
+    std_depth                 0.0223  
+    mean_leaf_area            0.0215  
+    leaf_count                0.0203  
+    merge_delta_bin_7         0.0096  
+    max_complexity            0.0000  
+
+============================================================
+  Gradient Boosting
+============================================================
+  Accuracy:  0.7647
+  Precision: 0.7713  (weighted)
+  Recall:    0.7647  (weighted)
+  F1:        0.7632  (weighted)
+  CV (5-fold): 0.7657 ± 0.0016
+
+  Confusion matrix:
+          ai  real  ← predicted
+    ai 13650  2544
+  real  5078 11116
+
+  Feature importances:
+    min_complexity            0.2815  ███████████
+    complexity_range          0.1884  ███████
+    max_merge_delta           0.0968  ███
+    std_complexity            0.0640  ██
+    leaf_count                0.0488  █
+    max_boundary_delta        0.0472  █
+    mean_depth                0.0424  █
+    mean_complexity           0.0420  █
+    mean_merge_delta          0.0365  █
+    mean_boundary_delta       0.0335  █
+    merge_delta_bin_0         0.0321  █
+    merge_delta_bin_5         0.0210  
+    std_merge_delta           0.0209  
+    std_leaf_area             0.0204  
+    merge_delta_bin_3         0.0092  
+    std_depth                 0.0059  
+    merge_delta_bin_4         0.0036  
+    mean_leaf_area            0.0025  
+    merge_delta_bin_7         0.0019  
+    merge_delta_bin_2         0.0006  
+    merge_delta_bin_1         0.0004  
+    merge_delta_bin_6         0.0003  
+    max_complexity            0.0000  
+
+============================================================
+  SUMMARY (by accuracy)
+============================================================
+  Random Forest             0.9005  ████████████████████████████████████
+  Gradient Boosting         0.7647  ██████████████████████████████
+  Logistic Regression       0.7544  ██████████████████████████████
+  Linear SVM                0.7542  ██████████████████████████████

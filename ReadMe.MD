@@ -141,6 +141,10 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 | `complexity_range` | max − min — spread of the distribution |
 | `mean_boundary_delta` | Average complexity jump between parent and child nodes |
 | `leaf_count` | Total subject leaf count |
+| `mean_merge_delta` | Average std(children) / parent across all splits — heterogeneity revealed per split |
+| `max_merge_delta` | Peak merge delta — highlights manipulation boundaries |
+| `std_merge_delta` | Variance of merge deltas — high in real photos, low in AI images |
+| `merge_delta_bin_0–7` | Histogram of merge delta distribution using logarithmic bin edges — captures distribution shape beyond mean/max/std |
 
 ---
 
@@ -257,6 +261,38 @@ Compression is the clear winner. The ~2% gap between test accuracy and CV score 
 
 **`min_complexity`** is the dominant feature in variance (37.5% importance in Gradient Boosting) but ranks lower in compression and shannon. Variance scores can reach true zero on flat regions, making the minimum a strong discriminator. Compression and shannon scores compress toward a narrow range where the minimum is less distinctive.
 
+**Merge delta histogram**
+
+The merge delta distribution is summarised both as scalar statistics (`mean_merge_delta`, `max_merge_delta`, `std_merge_delta`) and as an 8-bin histogram (`merge_delta_bin_0` through `merge_delta_bin_7`). The histogram captures distribution shape — two images with identical means can have completely different profiles, which the scalar stats cannot distinguish.
+
+Bin edges are logarithmic rather than linear, concentrating resolution where the mass actually sits:
+
+| Bin | Range | Description |
+|-----|-------|-------------|
+| 0 | 0.000 – 0.010 | Very low delta — flat AI regions |
+| 1 | 0.010 – 0.021 | |
+| 2 | 0.021 – 0.045 | |
+| 3 | 0.045 – 0.097 | Transition zone |
+| 4 | 0.097 – 0.207 | |
+| 5 | 0.207 – 0.440 | |
+| 6 | 0.440 – 0.938 | |
+| 7 | 0.938 – 2.000 | High delta tail — manipulation boundaries, real texture |
+
+Each bin value is a fraction of total splits, so all bins sum to 1.0 and are comparable across images of different sizes.
+
+**Histogram effectiveness by method**
+
+The histogram was evaluated against the baseline (no histogram) on the RealVsFake dataset:
+
+| Method | RF baseline | RF + linear bins | RF + log bins | Best Δ |
+|--------|-------------|-----------------|---------------|--------|
+| Compression | 90.13% | 89.97% | 90.05% | −0.08% |
+| Variance | 85.03% | **85.47%** | — | +0.44% |
+
+For compression, the merge delta distribution is too concentrated (90% of splits fall below 0.25) for the histogram to add signal beyond what `mean_merge_delta` and `std_merge_delta` already capture — the Random Forest is neutral to slightly negative. For variance, the distribution is wider and the histogram provides genuine additional signal, improving RF accuracy by +0.44% with linear bins. Log bins were tested on compression and showed no meaningful improvement over linear for that method.
+
+The histogram is included in the default feature set. For compression-only runs it can be dropped via `--features` without accuracy cost.
+
 **Threshold tuning**
 
 The pruning threshold is a hyperparameter that controls how aggressively low-complexity leaves are collapsed after the full tree is built. Tuning is done without trial and error using `tune_threshold.py`, which builds each quadtree once and sweeps prune cutoffs in memory — making the full sweep as fast as a single batch run.
@@ -319,6 +355,7 @@ Compression operates in the upper-right of this space — high accuracy at high 
 **Medium term**
 - ✅ Threshold hyperparameter tuning without trial and error
 - ✅ Full classifier evaluation on RealVsFake 161k dataset — compression RF achieves 90.1%
+- ✅ Merge delta histogram — logarithmic bins capture distribution shape; +0.44% RF accuracy on variance
 - Expand dataset: test against FFHQ (real) vs StyleGAN / Stable Diffusion outputs
 - Drop `max_complexity` from compression feature set and re-evaluate
 

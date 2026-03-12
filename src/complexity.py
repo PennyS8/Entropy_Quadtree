@@ -22,13 +22,12 @@ def shannon_entropy(region: np.ndarray, mask: np.ndarray = None) -> float:
     
     Treats each channel independently then averages, so RGB images
     are handled naturally.
-
+    
     Args:
         region: numpy array of shape (H, W) or (H, W, C), dtype uint8
         mask:   optional boolean array (H, W), True = include pixel.
                 If provided, only opaque pixels contribute to the score.
-
-
+    
     Returns:
         Float in [0, 1]. 0 = perfectly uniform, 1 = maximally random.
     """
@@ -69,7 +68,7 @@ def compression_entropy(region: np.ndarray, mask: np.ndarray = None) -> float:
         mask:   optional boolean array (H, W), True = include pixel.
                 If provided, only opaque pixels are compressed; prevents
                 transparent background pixels from delating the score.
-
+    
     Returns:
         Float in [0, 1]. 0 = perfectly compressible, 1 = incompressible.
     """
@@ -100,11 +99,11 @@ def variance_complexity(region: np.ndarray, mask: np.ndarray = None) -> None:
     
     Much faster than Shannon or compression, a single np.var call.
     Caputers spatial spread without histogram or zlib overhead.
-
+    
     Args:
         region: numpy array (H, W) or (H, W, C), dtype uint8
         mask: optional boolean array (H, W), True = include pixel.
-
+    
     Returns:
         Float in [0, 1]. 0 = uniform, 1 = maximaly varied.
     """
@@ -142,7 +141,7 @@ SCORERS = {
 def get_scorer(method: str):
     """
     Return a scoring function by name
-
+    
     Args:
         method: "shannon" or "compression" or "variance"
     
