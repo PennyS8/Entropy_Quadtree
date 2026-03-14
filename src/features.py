@@ -48,6 +48,15 @@ class imageFeatures:
     max_merge_delta: float      # peak merge delta — highlights manipulation boundaries
     std_merge_delta: float      # variance of merge deltas — high in real, low in AI
     
+    # Per-channel (optional, requires image passed to extract_features)
+    # Raw means track per-channel complexity; deltas capture inter-channel divergence.
+    mean_complexity_r: float = 0.0 # mean complexity of red channel across subject leaves
+    mean_complexity_g: float = 0.0 # mean complexity of green channel across subject leaves
+    mean_complexity_b: float = 0.0 # mean complexity of blue channel across subject leaves
+    complexity_delta_rg: float = 0.0 # |mean_r - mean_g|, inter-channel divergence
+    complexity_delta_rb: float = 0.0 # |mean_r - mean_b|
+    complexity_delta_gb: float = 0.0 # |mean_g - mean_b|
+    
     label: Optional[str] = None # "real", "ai", "photoshopped" (set manually)
     
     def to_dict(self) -> dict:
@@ -56,15 +65,21 @@ class imageFeatures:
 
 # Extractor
 
-def extract_features(root: QuadNode, filename: str, label: str = None) -> imageFeatures:
+def extract_features(root: QuadNode, filename: str, label: str = None,
+                    image: np.ndarray = None, scorer=None) -> imageFeatures:
     """
     Extract feature vector from a built quadtree.
-
+    
     Args:
-        root:     root QuadNode from QuadTree.build()
-        filename: image filename for identification in CSV
-        label:    optional ground truth label ("real", "ai", "photoshopped")
-
+        root:       root QuadNode from QuadTree.build()
+        filename:   image filename for identification in CSV
+        label:      optional ground truth label ("real", "ai", "photoshopped")
+        image:      optional numpy array (H, W, C) uint8 — if provided, per-channel
+                    complexity features are computed. Must be the same image used
+                    to build the tree so leaf coordinates are valid.
+        scorer:     optional scoring function — should match the method used to build
+                    the tree. Required if image is provided.
+        
     Returns:
         ImageFeatures dataclass
     """
@@ -81,6 +96,8 @@ def extract_features(root: QuadNode, filename: str, label: str = None) -> imageF
     # Boundary delta: for every internal node, measure complexity jump to children
     boundary_deltas = _compute_boundary_deltas(root)
     merge_deltas    = _compute_merge_deltas(root)
+    
+    channel_features = _compute_channel_features(subject_leaves, image, scorer)
     
     return imageFeatures(
         filename=os.path.basename(filename),
@@ -104,8 +121,10 @@ def extract_features(root: QuadNode, filename: str, label: str = None) -> imageF
         mean_merge_delta=float(np.mean(merge_deltas)) if len(merge_deltas) else 0.0,
         max_merge_delta=float(np.max(merge_deltas))  if len(merge_deltas) else 0.0,
         std_merge_delta=float(np.std(merge_deltas))  if len(merge_deltas) else 0.0,
-
-        label=label,
+        
+        **channel_features,
+        
+        label=label
     )
 
 
@@ -156,6 +175,61 @@ def _compute_merge_deltas(root:QuadNode) -> list:
     return deltas
 
 
+def _compute_channel_features(subject_leaves: list, image: np.ndarray, scorer) -> dict:
+    """
+    Score each RGB channel independently across all subject leaf regions and
+    return per-channel mean complexity and inter-channel delta features.
+    
+    Args:
+        subject_leaves: list of subject QuadNodes (background already filtered)
+        image:          numpy array (H, W, C) uint8 — the original image
+        scorer:         complexity scoring function, same as used to build the tree
+        
+    Returns:
+        dict with keys: mean_complexity_r/g/b, complexity_delta_rg/rb/gb.
+        All zeros if image or scorer is None, or if image has fewer than 3 channels.
+    """
+    zero = {
+        "mean_complexity_r": 0.0, "mean_complexity_g": 0.0, "mean_complexity_b": 0.0,
+        "complexity_delta_rg": 0.0, "complexity_delta_rb": 0.0, "complexity_delta_gb": 0.0
+    }
+    
+    if image is None or scorer is None:
+        return zero
+    if image.ndim < 3 or image.shape[2] < 3:
+        return zero
+    if not subject_leaves:
+        return zero
+    
+    scores_r, scores_g, scores_b = [], [], []
+    
+    for node in subject_leaves:
+        region = image[node.y:node.y + node.h, node.x:node.x + node.w]
+        if region.size == 0:
+            continue
+        # Score each channel slice independently — no mask needed since
+        # subject_leaves are already filtered for background_ratio
+        scores_r.append(scorer(region[:, :, 0]))
+        scores_g.append(scorer(region[:, :, 1]))
+        scores_b.append(scorer(region[:, :, 2]))
+    
+    if not scores_r:
+        return zero
+    
+    mean_r = float(np.mean(scores_r))
+    mean_g = float(np.mean(scores_g))
+    mean_b = float(np.mean(scores_b))
+    
+    return {
+        "mean_complexity_r":   mean_r,
+        "mean_complexity_g":   mean_g,
+        "mean_complexity_b":   mean_b,
+        "complexity_delta_rg": float(abs(mean_r - mean_g)),
+        "complexity_delta_rb": float(abs(mean_r - mean_b)),
+        "complexity_delta_gb": float(abs(mean_g - mean_b)),
+    }
+
+
 # CSV export
 
 FEATURE_FIELDS = [
@@ -165,6 +239,8 @@ FEATURE_FIELDS = [
     "mean_boundary_delta", "max_boundary_delta",
     "mean_depth", "std_depth",
     "mean_merge_delta", "max_merge_delta", "std_merge_delta",
+    "mean_complexity_r", "mean_complexity_g", "mean_complexity_b",
+    "complexity_delta_rg", "complexity_delta_rb", "complexity_delta_gb"
 ]
 
 def save_csv(features_list: list, output_path: str) -> None:

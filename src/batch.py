@@ -2,39 +2,33 @@
 batch.py
 
 Run the entropy visualizer on every image in one or more folders.
-Produces overlay images and a features.csv for scatter plot analysis.
+Extracts features and writes them to an explicitly named CSV file.
+Overlay rendering is disabled; use main.py for single image overlays.
 
 Usage:
     # Single folder
-    python3 batch.py --input my_images --labels unlabeled --output results
-
+    python3 batch.py --input my_images --labels unlabeled --output results/features.csv
+    
     # Multiple folders in one run — builds a labeled dataset in a single pass
-    python3 batch.py --input real_photos ai_images --labels real ai --output results
-
-    # Append a new class to an existing features.csv
-    python3 batch.py --input photoshopped --labels photoshopped --output results --append
-
-    # Skip overlay rendering, extract features only (much faster)
-    python3 batch.py --input real_photos ai_images --labels real ai --output results --no-overlay
-
+    python3 batch.py --input real_photos ai_images --labels real ai --output results/features_compression.csv
+    
+    # Append a new class to an existing CSV
+    python3 batch.py --input photoshopped --labels photoshopped --output results/features_compression.csv --append
+    
     # Parallel processing
-    python3 batch.py --input real_photos ai_images --labels real ai --output results --workers 8
+    python3 batch.py --input real_photos ai_images --labels real ai --output results/features_compression.csv --workers 8
 
 Required args:
     --input     one or more input folders of images
     --labels    one label per folder, same order as --input (e.g. real ai photoshopped)
-    --output    output folder for overlay images and features.csv
+    --output    path for the output CSV file (e.g. results/features_compression.csv)
 
 Optional args:
     --method      shannon|compression|variance  (default: shannon)
     --leaf_size   int     target leaf side length in pixels (default: 4)
     --threshold   float   percentile pruning cutoff, default off
-    --alpha       int     overlay opacity 0-255 (default: 120)
     --append              append to existing features.csv instead of overwriting
-    --no-overlay          skip overlay image rendering, extract features only
     --workers     int     number of parallel workers (default: 1)
-    --borders             show quadrant border lines
-    --legend              show the colorbar legend
 """
 
 import argparse
@@ -57,20 +51,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Batch entropy visualization and feature extraction.")
     parser.add_argument("--input", nargs="+", required=True, help="Input folder(s) of images")
     parser.add_argument("--labels", nargs="+", required=True, help="Label for each input folder (same order as --input)")
-    parser.add_argument("--output", required=True, help="Output folder for results")
+    parser.add_argument("--output", required=True,
+                        help="Output path for features CSV (e.g. results/features_compression.csv)")
     parser.add_argument("--method", choices=["shannon", "compression", "variance"], default="shannon")
     parser.add_argument("--leaf_size", type=int, default=4,
                         help="Target leaf side length in pixels. (default: 4)")
     parser.add_argument("--threshold", type=float, default=None)
-    parser.add_argument("--alpha", type=int, default=120)
-    parser.add_argument("--label", type=str, default=None,
-                        help="Label for all images in this batch (e.g. real, ai, photoshopped)")
     parser.add_argument("--append", action="store_true",
                         help="Append to existing features.csv instead of overwriting")
-    parser.add_argument("--no-overlay", action="store_true",
-                        help="Skip overlay image rendering, extract features only")
-    parser.add_argument("--borders", action="store_true")
-    parser.add_argument("--legend", action="store_true")
     parser.add_argument("--workers", type=int, default=1,
                         help=f"Number of parallel workers (default: 1, max: {cpu_count()})")
     return parser.parse_args()
@@ -116,7 +104,7 @@ def process_image(args_tuple):
         )
 
         root = qt.build(image_array, alpha=alpha, normalize=not no_overlay)
-        feat = extract_features(root, filename, label=label)
+        feat = extract_features(root, filename, label=label, image=image_array, scorer=scorer)
 
         if not no_overlay:
             save_result(
@@ -142,7 +130,7 @@ def main():
         print("Error: --input and --labels must have the same number of entries.")
         sys.exit(1)
         
-    os.makedirs(args.output, exist_ok=True)
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     workers = min(args.workers, cpu_count())
     leaf_size_display = args.leaf_size or "auto"
     
@@ -162,13 +150,10 @@ def main():
         print(f"Found {len(entries)} image(s) in '{folder} (label: {label})")
         for filename in entries:
             input_path = os.path.join(folder, filename)
-            stem = os.path.splitext(filename)[0]
-            output_path = os.path.join(args.output, f"{stem}_entropy.png")
             tasks.append((
-                filename, input_path, output_path,
+                filename, input_path, None,
                 args.method, args.leaf_size, args.threshold,
-                label, args.no_overlay, args.alpha,
-                args.borders, args.legend,
+                label, True, 120, False, False
             ))
     
     if not tasks:
@@ -178,7 +163,7 @@ def main():
     print(f"\nTotal: {len(tasks)} images\n")
     
     # Load existing features if appending
-    features_path = os.path.join(args.output, f"features_{args.method}.csv")
+    features_path = args.output
     if args.append and os.path.exists(features_path):
         existing_dicts = load_csv(features_path)
         print(f"Appending to existing {len(existing_dicts)} entries in features.csv\n")
@@ -199,11 +184,12 @@ def main():
                     errors += 1
                 else:
                     new_features.append(feat)
-                    if i % 5000 == 0:
-                        print(f"[{i}/{len(tasks)}] {filename} "
-                            f"\tmean: {feat.mean_complexity:.4f}  "
-                            f"std: {feat.std_complexity:.4f}  "
-                            f"boundary_delta: {feat.mean_boundary_delta:.4f}")
+                    if i % 5000 != 0:
+                        continue
+                    print(f"[{i}/{len(tasks)}] {filename} "
+                        f"\tmean: {feat.mean_complexity:.4f}  "
+                        f"std: {feat.std_complexity:.4f}  "
+                        f"boundary_delta: {feat.mean_boundary_delta:.4f}")
     else:
         for i, task in enumerate(tasks, 1):
             filename, feat, err = process_image(task)

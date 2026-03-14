@@ -138,9 +138,25 @@ Each quadtree is distilled into a feature vector and written to `features.csv`:
 |---------|-------------|
 | `mean_complexity` | Average complexity across subject leaf nodes |
 | `std_complexity` | Variance — low in AI images which tend toward uniform complexity |
+| `min_complexity` | Floor of complexity — strong discriminator for variance (can reach true zero) |
+| `max_complexity` | Ceiling of complexity — always 1.0 for compression, zero importance |
 | `complexity_range` | max − min — spread of the distribution |
-| `mean_boundary_delta` | Average complexity jump between parent and child nodes |
+| `mean_leaf_area` | Average subject leaf area in pixels |
+| `std_leaf_area` | Variance in leaf area — high = adaptive splits |
 | `leaf_count` | Total subject leaf count |
+| `mean_boundary_delta` | Average complexity jump between parent and child nodes |
+| `max_boundary_delta` | Maximum boundary jump — manipulation signal |
+| `mean_depth` | Average tree depth across subject leaves |
+| `std_depth` | Variance in depth |
+| `mean_merge_delta` | Average std(children) / parent across all splits — heterogeneity revealed per split |
+| `max_merge_delta` | Peak merge delta — highlights manipulation boundaries |
+| `std_merge_delta` | Variance of merge deltas — high in real photos, low in AI images |
+| `mean_complexity_r/g/b` | Per-channel mean complexity scored independently — captures channel-specific texture signal |
+| `complexity_delta_rg/rb/gb` | Absolute difference between channel mean complexities — inter-channel divergence |
+| `mean_merge_delta` | Average std(children) / parent across all splits — heterogeneity revealed per split |
+| `max_merge_delta` | Peak merge delta — highlights manipulation boundaries |
+| `std_merge_delta` | Variance of merge deltas — high in real photos, low in AI images |
+| `merge_delta_bin_0–7` | Histogram of merge delta distribution using logarithmic bin edges — captures distribution shape beyond mean/max/std |
 
 ---
 
@@ -241,11 +257,12 @@ These signatures emerge from no training data and no learned model — purely fr
 
 All runs used `--balance` to equalize class counts. Thresholds are the per-method optima identified by `tune_threshold.py`.
 
-| Method | Threshold | Test accuracy | CV score |
-|--------|-----------|--------------|----------|
-| Compression | 11 | **90.1%** | 88.0% ± 0.3% |
-| Shannon | 13 | 89.0% | 86.9% ± 0.2% |
-| Variance | 71 | 85.0% | 82.6% ± 0.1% |
+| Method | Features | Threshold | Test accuracy | CV score |
+|--------|----------|-----------|--------------|----------|
+| Compression + channel complexity | all | 11 | **90.3%** | **88.5% ± 0.1%** |
+| Compression | baseline | 11 | 90.1% | 88.0% ± 0.3% |
+| Shannon | baseline | 13 | 89.0% | 86.9% ± 0.2% |
+| Variance | baseline | 71 | 85.0% | 82.6% ± 0.1% |
 
 Compression is the clear winner. The ~2% gap between test accuracy and CV score is consistent across all three methods, indicating mild but uniform overfitting — not a red flag.
 
@@ -256,6 +273,66 @@ Compression is the clear winner. The ~2% gap between test accuracy and CV score 
 **Merge delta features** (`mean_merge_delta`, `max_merge_delta`, `std_merge_delta`) are consistently useful across all three methods and all model types. They are the most method-agnostic signal in the feature set — measuring how much internal heterogeneity is revealed at each quadtree split. Real photographs show high variance at splits; AI images do not.
 
 **`min_complexity`** is the dominant feature in variance (37.5% importance in Gradient Boosting) but ranks lower in compression and shannon. Variance scores can reach true zero on flat regions, making the minimum a strong discriminator. Compression and shannon scores compress toward a narrow range where the minimum is less distinctive.
+
+**Merge delta histogram**
+
+The merge delta distribution is summarised both as scalar statistics (`mean_merge_delta`, `max_merge_delta`, `std_merge_delta`) and as an 8-bin histogram (`merge_delta_bin_0` through `merge_delta_bin_7`). The histogram captures distribution shape — two images with identical means can have completely different profiles, which the scalar stats cannot distinguish.
+
+Bin edges are logarithmic rather than linear, concentrating resolution where the mass actually sits:
+
+| Bin | Range | Description |
+|-----|-------|-------------|
+| 0 | 0.000 – 0.010 | Very low delta — flat AI regions |
+| 1 | 0.010 – 0.021 | |
+| 2 | 0.021 – 0.045 | |
+| 3 | 0.045 – 0.097 | Transition zone |
+| 4 | 0.097 – 0.207 | |
+| 5 | 0.207 – 0.440 | |
+| 6 | 0.440 – 0.938 | |
+| 7 | 0.938 – 2.000 | High delta tail — manipulation boundaries, real texture |
+
+Each bin value is a fraction of total splits, so all bins sum to 1.0 and are comparable across images of different sizes.
+
+**Histogram effectiveness by method**
+
+The histogram was evaluated against the baseline (no histogram) on the RealVsFake dataset:
+
+| Method | RF baseline | RF + linear bins | RF + log bins | Best Δ |
+|--------|-------------|-----------------|---------------|--------|
+| Compression | 90.13% | 89.97% | 90.05% | −0.08% |
+| Variance | 85.03% | **85.47%** | — | +0.44% |
+
+For compression, the merge delta distribution is too concentrated (90% of splits fall below 0.25) for the histogram to add signal beyond what `mean_merge_delta` and `std_merge_delta` already capture — the Random Forest is neutral to slightly negative. For variance, the distribution is wider and the histogram provides genuine additional signal, improving RF accuracy by +0.44% with linear bins. Log bins were tested on compression and showed no meaningful improvement over linear for that method.
+
+The histogram is included in the default feature set. For compression-only runs it can be dropped via `--features` without accuracy cost.
+
+**Per-channel complexity**
+
+The standard complexity score flattens all RGB channels into a single array before scoring. Per-channel complexity runs the scorer independently on each channel slice per leaf, producing three separate mean scores and three inter-channel delta features.
+
+Real photographs have natural channel correlation structure driven by physics — illumination, skin reflectance, and material properties create smooth, correlated variation across channels. AI generators learn to produce plausible-looking RGB values but may not reproduce the underlying physical correlation, causing channels to vary semi-independently in ways that are statistically unusual despite looking correct to the eye.
+
+The six features added:
+
+| Feature | Description |
+|---------|-------------|
+| `mean_complexity_r` | Mean complexity of red channel across subject leaves |
+| `mean_complexity_g` | Mean complexity of green channel across subject leaves |
+| `mean_complexity_b` | Mean complexity of blue channel across subject leaves |
+| `complexity_delta_rg` | \|mean_r − mean_g\| — inter-channel divergence |
+| `complexity_delta_rb` | \|mean_r − mean_b\| |
+| `complexity_delta_gb` | \|mean_g − mean_b\| |
+
+Per-channel features require passing `image=` and `scorer=` to `extract_features()`. `batch.py` does this automatically. If not provided, all six fields default to 0.0 — fully backwards compatible.
+
+Results on the RealVsFake dataset (compression, 161,972 images):
+
+| Config | RF test accuracy | RF CV score |
+|--------|-----------------|-------------|
+| Compression baseline | 90.13% | 88.02% ± 0.26% |
+| Compression + channel complexity | **90.27%** | **88.49% ± 0.11%** |
+
+All six channel features carry non-zero importance in the Random Forest — no dead features. The delta features rank slightly above the raw means, confirming that inter-channel divergence is the more discriminating signal. The absolute delta values are small (mean ~0.005–0.007) but consistent across 161k images, which is enough for the RF to exploit.
 
 **Threshold tuning**
 
@@ -289,7 +366,7 @@ Compression operates in the upper-right of this space — high accuracy at high 
 
 `leaf_size` controls the spatial resolution of the quadtree — the minimum side length in pixels at which splitting stops. It is a separate hyperparameter from threshold and affects all three methods differently. Compression has a hard lower bound of `leaf_size=16` because zlib's header overhead dominates at smaller block sizes, making compression ratios unreliable. Shannon and variance work accurately at `leaf_size=4` — a 4px block contains enough pixels for a meaningful entropy or variance calculation, whereas a 1×1 pixel leaf has no relative complexity to measure. Increasing leaf size reduces tree depth and leaf count uniformly, which decreases feature resolution but speeds up both build time and classification. The defaults are chosen to be the smallest reliable value for each method.
 
-**Recommended configuration:** `--method compression --threshold 11`, giving **90.1% test accuracy** on the RealVsFake dataset.
+**Recommended configuration:** `--method compression --threshold 11` with per-channel features enabled (default), giving **90.3% test accuracy** on the RealVsFake dataset.
 
 ---
 
@@ -315,12 +392,13 @@ Compression operates in the upper-right of this space — high accuracy at high 
 - ✅ Resolution-independent splitting via leaf_size
 - ✅ Two-pass percentile pruning for content-adaptive threshold
 - ✅ Lightweight classifier: logistic regression, SVM, random forest, gradient boosting on extracted features
-
-**Medium term**
 - ✅ Threshold hyperparameter tuning without trial and error
 - ✅ Full classifier evaluation on RealVsFake 161k dataset — compression RF achieves 90.1%
+
+**Medium term**
+- ✅ Per-channel complexity features — inter-channel divergence signal; +0.14% test accuracy, +0.47% CV score on compression
+- ✅ Merge delta histogram — logarithmic bins capture distribution shape; +0.44% RF accuracy on variance
 - Expand dataset: test against FFHQ (real) vs StyleGAN / Stable Diffusion outputs
-- Drop `max_complexity` from compression feature set and re-evaluate
 
 **Longer term**
 - Video pipeline: extract frames, build a complexity tensor across time, measure temporal stability of face-region complexity

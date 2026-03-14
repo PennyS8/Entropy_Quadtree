@@ -42,9 +42,7 @@ from sklearn.utils import resample
 
 from features import load_csv, FEATURE_FIELDS
 
-# FEATURE_COLS = ["mean_complexity", "std_complexity", "complexity_range", "mean_boundary_delta"]
-FEATURE_COLS = ["mean_complexity","std_complexity","min_complexity","max_complexity","complexity_range","mean_leaf_area","std_leaf_area","leaf_count","mean_boundary_delta","max_boundary_delta","mean_depth","std_depth","mean_merge_delta","max_merge_delta","std_merge_delta"]
-
+FEATURE_COLS = [f for f in FEATURE_FIELDS if f not in ("filename", "label")]
 
 CLASSIFIERS_FULL = {
     "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
