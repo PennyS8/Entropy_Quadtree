@@ -19,6 +19,7 @@ Usage:
     python3 classify.py results/features.csv --test-size 0.2
     python3 classify.py results/features.csv --features mean_complexity std_complexity
     python3 classify.py results/features.csv --balance
+    python3 classify.py results/features.csv --purmutation-importance
 
 Output:
     Console report: accuracy, precision, recall, F1, confusion matrix
@@ -34,6 +35,7 @@ from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     confusion_matrix,
@@ -48,12 +50,12 @@ CLASSIFIERS_FULL = {
     "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
     "Linear SVM":          LinearSVC(max_iter=2000, random_state=42),
     "Random Forest":       RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1),
-    "Gradient Boosting":   GradientBoostingClassifier(n_estimators=100, random_state=42),
+    "Gradient Boosting":   GradientBoostingClassifier(n_estimators=100, random_state=42)
 }
 
 CLASSIFIERS_FAST = {
     "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
-    "Random Forest":       RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1),
+    "Random Forest":       RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
 }
 
 
@@ -73,6 +75,10 @@ def parse_args():
                         help="Undersample majority class to balance dataset")
     parser.add_argument("--cv", type=int, default=5,
                         help="Number of cross-validation folds (default: 5)")
+    parser.add_argument("--permutation-importance", action="store_true",
+                       help="Compute permutation importance for Random Forest in addition "
+                       "to impurity-based importance. Slower but more reliable for "
+                       "correlated features.")
     return parser.parse_args()
 
 
@@ -152,7 +158,12 @@ def format_confusion_matrix(cm, labels):
     return "\n".join([header] + rows)
 
 
-def evaluate(name, clf, x_train, x_test, y_train, y_test, feature_cols, cv_scores):
+def evaluate(name, clf,
+    x_train, x_test,
+    y_train, y_test,
+    feature_cols, cv_scores,
+    show_permutation_importance=False
+):
     clf.fit(x_train, y_train)
     y_pred = clf.predict(x_test)
     labels = sorted(set(y_test))
@@ -182,7 +193,19 @@ def evaluate(name, clf, x_train, x_test, y_train, y_test, feature_cols, cv_score
         for feat, imp in importances:
             bar = "█" * int(imp * 40)
             lines.append(f"    {feat:<25} {imp:.4f}  {bar}")
-
+    
+    # Permutation importance (opt-in, RF and GB only)
+    if show_permutation_importance and hasattr(clf, "feature_importances_"):
+        lines.append(f"\n  Permutation importances (mean decrease in accuracy, 10 repeats):")
+        result = permutation_importance(clf, x_test, y_test, n_repeats=10, random_state=42, n_jobs=-1)
+        perm_sorted = sorted(
+            zip(feature_cols, result.importances_mean, result.importances_std),
+            key=lambda x: -x[1]
+        )
+        for feat, mean, std in perm_sorted:
+            bar = "█" * max(0, int(mean * 40))
+            lines.append(f"    {feat:<25} {mean:+.4f} ± {std:.4f}  {bar}")
+    
     # Logistic regression coefficients
     if hasattr(clf, "coef_"):
         lines.append(f"\n  Coefficients:")
@@ -244,6 +267,7 @@ def main():
         else:
             x_tr, x_te = x_train_s, x_test_s
         cv_scores = cross_val_score(clf, x_tr, y_train, cv=cv, scoring="accuracy", n_jobs=-1)
+        perm_imp = getattr(args, "permutation_importance", False)
         report, acc = evaluate(name, clf, x_tr, x_te, y_train, y_test, args.features, cv_scores)
         print(f"accuracy={acc:.4f}")
         all_lines.append(report)

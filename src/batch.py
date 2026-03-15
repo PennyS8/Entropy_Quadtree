@@ -21,7 +21,8 @@ Usage:
 Required args:
     --input     one or more input folders of images
     --labels    one label per folder, same order as --input (e.g. real ai photoshopped)
-    --output    path for the output CSV file (e.g. results/features_compression.csv)
+    --output    path for the output CSV file, or a folder — if a folder or path ending
+                in '/' is given, the file is auto-named features_{method}.csv inside it
 
 Optional args:
     --method      shannon|compression|variance  (default: shannon)
@@ -49,10 +50,14 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch entropy visualization and feature extraction.")
-    parser.add_argument("--input", nargs="+", required=True, help="Input folder(s) of images")
-    parser.add_argument("--labels", nargs="+", required=True, help="Label for each input folder (same order as --input)")
+    parser.add_argument("--input", nargs="+", required=True,
+                        help="Input folder(s) of images")
+    parser.add_argument("--labels", nargs="+", required=True,
+                        help="Label for each input folder (same order as --input)")
     parser.add_argument("--output", required=True,
-                        help="Output path for features CSV (e.g. results/features_compression.csv)")
+                        help="Output path for features CSV, or a folder. "
+                        "If a folder (or path ending in /), auto-names to "
+                        "features_{method}.csv inside it.")
     parser.add_argument("--method", choices=["shannon", "compression", "variance"], default="shannon")
     parser.add_argument("--leaf_size", type=int, default=4,
                         help="Target leaf side length in pixels. (default: 4)")
@@ -62,6 +67,22 @@ def parse_args():
     parser.add_argument("--workers", type=int, default=1,
                         help=f"Number of parallel workers (default: 1, max: {cpu_count()})")
     return parser.parse_args()
+
+
+def resolve_output_path(output_arg: str, method: str) -> str:
+    """
+    Resolve --output to a concrete CSV path
+
+    - Ends in .csv          -> use as-is
+    - Ends in / or is a dir -> auto-name features_{method}.csv inside it
+    - Anything else         -> use as-is
+    """
+    if output_arg.endswith(".csv"):
+        return output_arg
+    stripped = output_arg.rstrip("/").rstrip(os.sep)
+    if output_arg.endswith("/") or output_arg.endswith(os.sep) or os.path.isdir(output_arg):
+        return os.path.join(stripped, "features_{}.csv".format(method))
+    return output_arg
 
 
 def load_image(path: str):
@@ -129,8 +150,10 @@ def main():
     if len(args.input) != len(args.labels):
         print("Error: --input and --labels must have the same number of entries.")
         sys.exit(1)
-        
+    
+    features_path = resolve_output_path(args.output, args.method)
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    print("Output: {}".format(features_path))
     workers = min(args.workers, cpu_count())
     leaf_size_display = args.leaf_size or "auto"
     
