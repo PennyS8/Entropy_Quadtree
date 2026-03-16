@@ -1,422 +1,445 @@
-# entropy_viz
+# Entropy Quadtree
 
-A Python tool that visualizes image complexity as an adaptive quadtree overlay using entropy scoring, with applications in AI-generated image detection and manipulation forensics.
+A tool for visualizing and classifying image complexity using adaptive quadtrees.
+Originally designed to distinguish real photographs from AI-generated and photoshopped images,
+though the feature set is general-purpose for any image complexity analysis task.
 
----
-
-## Overview
-
-entropy_viz recursively subdivides an image into quadrants and scores each region for complexity. High-complexity regions — dense texture, fine detail, irregular structure — subdivide into smaller cells. Low-complexity regions — flat color, blurred backgrounds, repeated patterns — remain as large blocks. The result is an overlay where cell size and color both encode information density.
-
-The core insight driving the project: compression ratio is a better proxy for true complexity than Shannon entropy. A blurred background has varied pixel values (high Shannon entropy) but compresses easily (low Kolmogorov complexity). zlib correctly identifies it as simple. Shannon does not. Variance offers a fast middle ground — cheaper than compression but more spatially grounded than Shannon.
+The core idea: recursively subdivide an image into quadrants, score each region's complexity,
+and use the resulting tree structure — not just the scores themselves — as a rich feature vector
+for classification.
 
 ---
 
-## Install
+## How it works
 
-```bash
-pip install pillow numpy
-```
+A **quadtree** is built over each image by recursively splitting regions into four quadrants
+until a minimum leaf size is reached. Each region is scored for complexity using one of three
+methods:
 
-Requires Python 3.7+.
+- **Shannon entropy** — pixel value distribution. Fast and works at any leaf size.
+- **Compression ratio** — zlib compressibility. Captures repetition that entropy misses (reliable at `--leaf_size 16`).
+- **Variance** — normalised pixel variance. Fastest; a good proxy for compression.
 
----
+Background regions (identified via alpha channel) are excluded from scoring and statistics.
+The resulting tree is then used to extract a feature vector for each image.
 
-## Usage
+### Example output
 
-### Single image
+![Example overlays showing AI-generated, photoshopped, and photographed images](results\examples\proof_of_concept.png)
 
-```bash
-# Shannon entropy, default leaf size (4px)
-python main.py photo.jpg
+Each pair shows the original image alongside its complexity overlay. Several patterns are
+immediately visible:
 
-# Compression entropy, default leaf size (16px)
-python main.py photo.jpg --method compression
-
-# Variance scorer, custom leaf size
-python main.py photo.jpg --method variance --leaf-size 8
-
-# Adaptive pruning — collapse least complex 25% of leaves after full build
-python main.py photo.jpg --method compression --threshold 25
-
-# Save to custom path, show legend and borders
-python main.py photo.jpg -o result.png --legend --borders
-```
-
-### Batch processing
-
-Run across one or more folders of images, producing overlay PNGs and a `features.csv`:
-
-```bash
-# Multiple folders in one run — builds a labeled dataset in a single pass
-python3 batch.py --input real_photos/ ai_images/ --labels real ai --output results/
-
-# Skip overlay rendering, extract features only (much faster)
-python3 batch.py --input real_photos/ ai_images/ --labels real ai --output results/ --no-overlay
-
-# Append a new class to an existing features.csv
-python3 batch.py --input photoshopped/ --labels photoshopped --output results/ --append
-```
-
-### RealVsFake dataset (wish096)
-
-```bash
-python3 batch.py \
-    --input "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Real" \
-            "/home/penny/.cache/kagglehub/datasets/wish096/realvsfake-81k-by-wish/versions/3/RealVsFake/RealVsFake/Fake" \
-    --labels real ai \
-    --output results/ --no-overlay --workers 8 --method compression --threshold 11
-```
-
-### Scatter plot
-
-Visualize how well complexity features separate image classes:
-
-```bash
-# Default: mean_complexity vs std_complexity
-python3 scatter.py results/features_compression.csv
-
-# Specify axes
-python3 scatter.py results/features_compression.csv --x mean_boundary_delta --y std_complexity
-
-# Generate all useful feature pair plots, skipping highly correlated pairs
-python3 scatter.py results/features_compression.csv --auto --output results/scatter/
-
-# Stricter correlation pruning
-python3 scatter.py results/features_compression.csv --auto --corr-threshold 0.85
-```
+- **AI-generated** (top left): the hair is saturated red — extremely high complexity from the
+  chaotic strand-level detail that diffusion models generate. The face and clothing sit in
+  mid-range green/yellow.
+- **Photoshopped** (bottom left): the face is deep blue — unusually *low* complexity for skin,
+  a signature of retouching that smooths texture. The hair is green/orange, much simpler than
+  the AI example despite being similarly coloured.
+- **Photographed** (bottom right): more spatially uniform green/blue throughout, with gentle
+  variation. No extreme highs or lows — the natural complexity gradient of an unmodified photo.
 
 ---
 
-## How It Works
-
-**Scoring methods**
-
-Three complexity scorers are available, all returning a normalized float in `[0, 1]`:
-
-- **Shannon entropy** — measures pixel value distribution across all channels as a single flattened histogram. Fast, works well at small leaf sizes.
-- **Compression ratio** — compresses raw pixel bytes with zlib and measures how much they shrink. Slower but more principled — approximates Kolmogorov complexity from above. Reliable at `leaf_size >= 16`.
-- **Variance** — computes `np.var` across pixel values. Fastest scorer. Raw values are adaptively normalized using the 99th percentile of the image's own distribution with sqrt stretching — no hardcoded constants.
-
-All scorers accept an optional opacity mask and only score opaque pixels, so transparent regions don't corrupt the complexity measurement of boundary nodes.
-
-**Quadtree construction**
-
-The image is recursively split into four quadrants using a two-pass approach:
-
-Pass 1 — build to full depth. Splitting stops when:
-- The child would be at or below `leaf_size` pixels (resolution-independent — equivalent spatial granularity across any image size)
-- Region is >= 95% transparent (background guard)
-
-Pass 2 — percentile pruning (optional). If `--threshold` is set, leaf nodes below the Nth percentile of the image's own complexity distribution are collapsed back into their parent. This is fully content-adaptive — the cutoff is derived from the image itself, not a fixed value.
-
-**Leaf size defaults**
-
-| Method | Default leaf size | Rationale |
-|--------|-------------------|-----------|
-| `shannon` | 4px | Works accurately at fine grain |
-| `variance` | 4px | Works accurately at fine grain |
-| `compression` | 16px | zlib unreliable below ~768 bytes |
-
-**Adaptive variance normalization**
-
-When rendering an overlay with `--method variance`, the raw variance scores are rescaled using `sqrt(var / p99)` where `p99` is the 99th percentile of the image's own leaf variances. This ensures the full color range is used regardless of image content. Normalization is skipped during `--no-overlay` batch runs for speed.
-
-**Background masking**
-
-For RGBA images, each node is tagged with `background_ratio` (fraction of transparent pixels). Nodes above `BG_THRESHOLD` (0.95) are excluded from complexity statistics and shown as neutral grey in the overlay.
-
-**Visualization**
-
-Subject nodes are colored by complexity score: blue (low) → green → yellow → red (high). Background nodes appear as neutral grey. The output PNG preserves the original alpha channel so transparent regions remain transparent. Borders and legend are opt-in via `--borders` and `--legend`.
-
-**Feature extraction**
-
-Each quadtree is distilled into a feature vector and written to `features.csv`:
-
-| Feature | Description |
-|---------|-------------|
-| `mean_complexity` | Average complexity across subject leaf nodes |
-| `std_complexity` | Variance — low in AI images which tend toward uniform complexity |
-| `min_complexity` | Floor of complexity — strong discriminator for variance (can reach true zero) |
-| `max_complexity` | Ceiling of complexity — always 1.0 for compression, zero importance |
-| `complexity_range` | max − min — spread of the distribution |
-| `mean_leaf_area` | Average subject leaf area in pixels |
-| `std_leaf_area` | Variance in leaf area — high = adaptive splits |
-| `leaf_count` | Total subject leaf count |
-| `mean_boundary_delta` | Average complexity jump between parent and child nodes |
-| `max_boundary_delta` | Maximum boundary jump — manipulation signal |
-| `mean_depth` | Average tree depth across subject leaves |
-| `std_depth` | Variance in depth |
-| `mean_merge_delta` | Average std(children) / parent across all splits — heterogeneity revealed per split |
-| `max_merge_delta` | Peak merge delta — highlights manipulation boundaries |
-| `std_merge_delta` | Variance of merge deltas — high in real photos, low in AI images |
-| `mean_complexity_r/g/b` | Per-channel mean complexity scored independently — captures channel-specific texture signal |
-| `complexity_delta_rg/rb/gb` | Absolute difference between channel mean complexities — inter-channel divergence |
-| `mean_merge_delta` | Average std(children) / parent across all splits — heterogeneity revealed per split |
-| `max_merge_delta` | Peak merge delta — highlights manipulation boundaries |
-| `std_merge_delta` | Variance of merge deltas — high in real photos, low in AI images |
-| `merge_delta_bin_0–7` | Histogram of merge delta distribution using logarithmic bin edges — captures distribution shape beyond mean/max/std |
-
----
-
-## Files
+## File overview
 
 | File | Purpose |
-|------|---------|
-| `complexity.py` | Shannon, compression, and variance scorers with opacity mask support |
-| `quadtree.py` | `QuadNode` dataclass and `QuadTree` builder with background masking |
-| `visualizer.py` | Overlay rendering, RGBA preservation, and colorbar legend |
-| `features.py` | Feature extraction and CSV export |
-| `scatter.py` | Scatter plot visualization of extracted features |
-| `main.py` | Single image CLI entry point |
-| `batch.py` | Batch processing, feature extraction, and labeled dataset pipeline |
-| `classify.py` | Train and evaluate classifiers on extracted features |
-| `tune_threshold.py` | Hyperparameter tuning for the pruning threshold |
-| `tune_plots.py` | Visualization of threshold tuning results |
+|---|---|
+| `src/main.py` | Single-image visualizer — renders a complexity overlay PNG |
+| `src/depth_distribution.py` | Analyses tree depth across a dataset to calibrate grid depth |
+| `src/tune_thresholds.py` | Sweeps the pruning threshold hyperparameter, finds the best value |
+| `src/tune_plots.py` | Plots output from `tune_thresholds.py` |
+| `src/batch.py` | Multi-folder batch processor — extracts features to CSV |
+| `src/classify.py` | Trains and evaluates classifiers on an extracted feature CSV |
+| `src/scatter.py` | Scatter plots of feature pairs across a labeled dataset |
+| `src/quadtree.py` | Core quadtree builder (`QuadTree`, `QuadNode`) |
+| `src/complexity.py` | Scoring functions: `shannon_entropy`, `compression_entropy`, `variance_complexity` |
+| `src/features.py` | Feature extraction from a built tree (`extract_features`, CSV I/O) |
+| `src/visualizer.py` | Overlay rendering and colormap |
 
 ---
 
-## Options
+## Installation
 
-**main.py**
+```bash
+pip install pillow numpy scikit-learn matplotlib
+```
+
+---
+
+## Quickstart
+
+### 1. Visualize a single image
+
+```bash
+python3 src/main.py photo.jpg
+python3 src/main.py photo.jpg --method compression --leaf_size 16
+python3 src/main.py photo.jpg --method shannon --legend --borders
+python3 src/main.py photo.jpg -o result.png --alpha 160
+```
+
+Produces `photo_entropy.png` — the original image with a complexity heatmap overlaid.
+Blue = low complexity, red = high complexity.
+
+**Options:**
 
 | Flag | Default | Description |
-|------|---------|-------------|
+|---|---|---|
 | `--method` | `shannon` | `shannon`, `compression`, or `variance` |
-| `--leaf-size` | method default | Target leaf side length in pixels |
-| `--threshold` | off | Percentile (0–100) — prune least complex leaves after full build |
+| `--leaf_size` | `4` | Target leaf side length in pixels. Smaller = finer detail |
+| `--threshold` | off | Percentile pruning cutoff — collapses the least complex N% of leaves |
 | `--alpha` | `120` | Overlay opacity (0–255) |
-| `--borders` | off | Show quadrant border lines |
-| `--legend` | off | Show colorbar legend |
-
-**batch.py** (includes all main.py options plus):
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--input` | required | One or more input folders of images |
-| `--labels` | required | One label per folder, same order as `--input` |
-| `--append` | off | Append to existing `features.csv` instead of overwriting |
-| `--no-overlay` | off | Skip overlay rendering, extract features only |
-| `--workers` | `1` | Number of parallel workers |
-
-**scatter.py**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--x` | `mean_complexity` | Feature for the x axis |
-| `--y` | `std_complexity` | Feature for the y axis |
-| `--output` | alongside CSV | Output folder for plot(s) |
-| `--auto` | off | Generate scatter plots for all useful feature pairs |
-| `--corr-threshold` | `0.9` | Skip pairs with Pearson \|r\| above this value (only with `--auto`) |
-
-**classify.py**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--output` | alongside CSV | Path to save results text file |
-| `--test-size` | `0.2` | Fraction of data held out for testing |
-| `--features` | all | Feature columns to use |
-| `--fast` | off | Run only Logistic Regression and Random Forest |
-| `--balance` | off | Undersample majority class to balance dataset |
-| `--cv` | `5` | Number of cross-validation folds |
-
-**tune_threshold.py**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--input` | required | One or more folders of images (one per class) |
-| `--labels` | required | One label per folder, same order as `--input` |
-| `--thresholds` | `0 10 20 30 40 50 60` | Percentile values to sweep |
-| `--method` | `shannon` | Scoring method |
-| `--leaf_size` | `4` | Target leaf side length in pixels |
-| `--max_images` | off | Cap images per class — useful for fast pilot runs |
-| `--workers` | `4` | Parallel workers for image loading |
-| `--output` | `tune_results.csv` | Base output path — written as `tune_results_{method}.csv` |
-| `--append` | off | Merge new threshold values into existing CSV instead of overwriting |
+| `--borders` | off | Draw quadrant border lines |
+| `--legend` | off | Append a colorbar legend below the image |
+| `-o` | `<input>_entropy.png` | Output path |
 
 ---
 
-## Proof of Concept — AI Detection
+### 2. Tune the pruning threshold
 
-The compression quadtree produces meaningfully different signatures for real photographs and AI-generated images. Initial results on the RealVsFake dataset (81k real vs AI-generated images) show visible separation in feature space using only `mean_complexity` and `std_complexity`:
+Before extracting features at scale, find the optimal `--threshold` value for your dataset and
+method. The threshold controls what fraction of the least complex leaves are collapsed back into
+their parent — trading resolution for noise reduction. `tune_thresholds.py` builds each image's
+tree once and then applies different prune cutoffs in memory, so the sweep is nearly as fast as
+a single batch run.
 
-![Proof of concept comparison](./src/results/proof_of_concept.png)
+```bash
+# Coarse sweep (0, 10, 20, ... 60) — good starting point
+python3 src/tune_thresholds.py \
+    --input real_photos ai_images \
+    --labels real ai
 
-Real images cluster toward lower mean complexity and higher variance — natural photographs have regions of simple and complex content. AI-generated images cluster toward higher mean complexity and lower variance — generators produce uniformly high complexity with little internal differentiation.
+# Recommended starting config for compression
+python3 src/tune_thresholds.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --method compression --leaf_size 16
 
-**What the quadtree reveals on individual images:**
+# Fast pilot run before committing to the full dataset
+python3 src/tune_thresholds.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --max_images 200
 
-- **Real photograph** — smooth complexity gradient. Face scores moderate (green), hair shows genuine internal variation. No hard discontinuities.
-- **AI-generated** — hair and skin score uniformly high (red/orange) with little internal variation. The generator hallucinates plausible texture everywhere.
-- **Photoshopped** — recolored regions are flattened in complexity. A hard discontinuity appears at the manipulation boundary.
+# Refine around a known peak, appending to an existing results CSV
+python3 src/tune_thresholds.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --method compression \
+    --thresholds 28 30 32 34 35 36 38 40 \
+    --append
+```
 
-These signatures emerge from no training data and no learned model — purely from information-theoretic properties of the image content.
+Then visualize the sweep:
 
-**Classifier results (RealVsFake, 161,972 images, Random Forest)**
+```bash
+# Default: reads results/tuning/{shannon,compression,variance}.csv automatically
+python3 src/tune_plots.py
 
-All runs used `--balance` to equalize class counts. Thresholds are the per-method optima identified by `tune_threshold.py`.
+# Explicit input file
+python3 src/tune_plots.py --input results/tuning/compression.csv
+```
 
-| Method | Features | Threshold | Test accuracy | CV score |
-|--------|----------|-----------|--------------|----------|
-| Compression + channel complexity | all | 11 | **90.3%** | **88.5% ± 0.1%** |
-| Compression | baseline | 11 | 90.1% | 88.0% ± 0.3% |
-| Shannon | baseline | 13 | 89.0% | 86.9% ± 0.2% |
-| Variance | baseline | 71 | 85.0% | 82.6% ± 0.1% |
+Writes `results/tuning/` → `accuracy_vs_thresholds.png`, `leaf_count_vs_thresholds.png`, `accuracy_vs_leaf_count.png`.
+The script prints the optimal threshold and a ready-to-run `batch.py` command at the end.
 
-Compression is the clear winner. The ~2% gap between test accuracy and CV score is consistent across all three methods, indicating mild but uniform overfitting — not a red flag.
+---
 
-**Linear models** (Logistic Regression, Linear SVM) score 70–75% on compression and shannon but collapse to ~59% on variance. Variance's signal is real but highly non-linear — the Random Forest finds it, linear separators cannot. Compression and shannon do not have this problem.
+### 3. Calibrate tree-grid depth
 
-**`max_complexity`** scores exactly 0.0000 importance in the compression Random Forest — every image has at least one fully complex leaf, so the value is always 1.0 and carries no information. It is a safe feature to drop for compression runs.
+The spatial tree-grid feature (256 cells) is built by reading the quadtree at a fixed depth.
+`depth_distribution.py` samples your dataset to verify every image reliably reaches that depth
+before you commit to a full batch run.
 
-**Merge delta features** (`mean_merge_delta`, `max_merge_delta`, `std_merge_delta`) are consistently useful across all three methods and all model types. They are the most method-agnostic signal in the feature set — measuring how much internal heterogeneity is revealed at each quadtree split. Real photographs show high variance at splits; AI images do not.
+```bash
+# Default output: results/depth/{method}_spatial_map.png
+python3 src/depth_distribution.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --method compression \
+    --max_images 500
 
-**`min_complexity`** is the dominant feature in variance (37.5% importance in Gradient Boosting) but ranks lower in compression and shannon. Variance scores can reach true zero on flat regions, making the minimum a strong discriminator. Compression and shannon scores compress toward a narrow range where the minimum is less distinctive.
+# Run all three methods at once
+python3 src/depth_distribution.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --output results/depth/
+```
 
-**Merge delta histogram**
+---
 
-The merge delta distribution is summarised both as scalar statistics (`mean_merge_delta`, `max_merge_delta`, `std_merge_delta`) and as an 8-bin histogram (`merge_delta_bin_0` through `merge_delta_bin_7`). The histogram captures distribution shape — two images with identical means can have completely different profiles, which the scalar stats cannot distinguish.
+### 4. Extract features from a dataset
 
-Bin edges are logarithmic rather than linear, concentrating resolution where the mass actually sits:
+Use the threshold found in step 2 in the `--threshold` flag here.
 
-| Bin | Range | Description |
-|-----|-------|-------------|
-| 0 | 0.000 – 0.010 | Very low delta — flat AI regions |
-| 1 | 0.010 – 0.021 | |
-| 2 | 0.021 – 0.045 | |
-| 3 | 0.045 – 0.097 | Transition zone |
-| 4 | 0.097 – 0.207 | |
-| 5 | 0.207 – 0.440 | |
-| 6 | 0.440 – 0.938 | |
-| 7 | 0.938 – 2.000 | High delta tail — manipulation boundaries, real texture |
+```bash
+# Single folder, unlabeled — auto-named results/features/shannon.csv
+python3 src/batch.py --input my_images --labels unlabeled --output results/features/
 
-Each bin value is a fraction of total splits, so all bins sum to 1.0 and are comparable across images of different sizes.
+# Multiple folders in one pass — builds a labeled dataset
+python3 src/batch.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --output results/features/
 
-**Histogram effectiveness by method**
+# Append a third class to an existing CSV
+python3 src/batch.py \
+    --input photoshopped \
+    --labels photoshopped \
+    --output results/features/shannon.csv \
+    --append
 
-The histogram was evaluated against the baseline (no histogram) on the RealVsFake dataset:
+# Compression method with tuned threshold (better signal, use leaf_size 16)
+python3 src/batch.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --output results/features/ \
+    --method compression --leaf_size 16 --threshold 32
 
-| Method | RF baseline | RF + linear bins | RF + log bins | Best Δ |
-|--------|-------------|-----------------|---------------|--------|
-| Compression | 90.13% | 89.97% | 90.05% | −0.08% |
-| Variance | 85.03% | **85.47%** | — | +0.44% |
+# Parallel processing
+python3 src/batch.py \
+    --input real_photos ai_images \
+    --labels real ai \
+    --output results/features/ \
+    --workers 8
+```
 
-For compression, the merge delta distribution is too concentrated (90% of splits fall below 0.25) for the histogram to add signal beyond what `mean_merge_delta` and `std_merge_delta` already capture — the Random Forest is neutral to slightly negative. For variance, the distribution is wider and the histogram provides genuine additional signal, improving RF accuracy by +0.44% with linear bins. Log bins were tested on compression and showed no meaningful improvement over linear for that method.
+Produces a CSV with one row per image and 277 feature columns (21 scalar features + 256 spatial grid cells). Output files are named `{method}.csv` — e.g. `results/features/compression.csv`.
 
-The histogram is included in the default feature set. For compression-only runs it can be dropped via `--features` without accuracy cost.
+---
 
-**Per-channel complexity**
+### 5. Train classifiers
 
-The standard complexity score flattens all RGB channels into a single array before scoring. Per-channel complexity runs the scorer independently on each channel slice per leaf, producing three separate mean scores and three inter-channel delta features.
+```bash
+# Full suite (Logistic Regression, Linear SVM, Random Forest, Gradient Boosting)
+python3 src/classify.py results/features/compression.csv
 
-Real photographs have natural channel correlation structure driven by physics — illumination, skin reflectance, and material properties create smooth, correlated variation across channels. AI generators learn to produce plausible-looking RGB values but may not reproduce the underlying physical correlation, causing channels to vary semi-independently in ways that are statistically unusual despite looking correct to the eye.
+# Fast mode (Logistic Regression + Random Forest only)
+python3 src/classify.py results/features/compression.csv --fast
 
-The six features added:
+# Balance classes, show permutation importance
+python3 src/classify.py results/features/compression.csv --balance --permutation-importance --fast
+
+# Prune low-signal features before training
+python3 src/classify.py results/features/compression.csv --prune-features 0.0 --fast
+python3 src/classify.py results/features/compression.csv --prune-features 0.0005 --fast
+
+# Use only a subset of features
+python3 src/classify.py results/features/compression.csv \
+    --features mean_complexity std_complexity max_merge_delta mean_boundary_delta
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--fast` | off | Run only Logistic Regression and Random Forest |
+| `--balance` | off | Undersample majority class to equalize class counts |
+| `--test-size` | `0.2` | Fraction held out for testing |
+| `--cv` | `5` | Cross-validation folds |
+| `--features` | all | Subset of feature columns to use |
+| `--permutation-importance` | off | Compute permutation importance for RF/GB (slower, more reliable than impurity importance for correlated features) |
+| `--prune-features THRESHOLD` | off | Fit a probe RF, drop features below `THRESHOLD` permutation importance, then run classifiers on the reduced set. `0.0` drops only harmful features; `0.0005` is more aggressive |
+| `--output` | `results/classify/{csv_stem}.txt` | Path for the saved report |
+
+Output includes accuracy, precision, recall, F1, confusion matrix, feature importances, and a summary ranking.
+
+#### Note on WSL
+
+If you're running on WSL and hit `OSError: [Errno 12] Cannot allocate memory`, this is a joblib
+fork issue. The fix is already included in `classify.py` via `joblib.parallel_backend("threading")`.
+
+---
+
+### 6. Scatter plots
+
+```bash
+# Default axes (mean_complexity vs std_complexity)
+# Output: results/scatter/compression/scatter_compression.png
+python3 src/scatter.py results/features/compression.csv
+
+# Custom axes
+python3 src/scatter.py results/features/compression.csv --x mean_boundary_delta --y max_merge_delta
+
+# Generate all non-redundant feature pair plots
+python3 src/scatter.py results/features/compression.csv --auto
+
+# Skip highly correlated pairs (default |r| >= 0.9)
+python3 src/scatter.py results/features/compression.csv --auto --corr-threshold 0.85
+```
+
+---
+
+## Feature reference
+
+Each image produces 277 features (21 scalar + 256 spatial).
+
+### Scalar features (21)
 
 | Feature | Description |
-|---------|-------------|
-| `mean_complexity_r` | Mean complexity of red channel across subject leaves |
-| `mean_complexity_g` | Mean complexity of green channel across subject leaves |
-| `mean_complexity_b` | Mean complexity of blue channel across subject leaves |
-| `complexity_delta_rg` | \|mean_r − mean_g\| — inter-channel divergence |
-| `complexity_delta_rb` | \|mean_r − mean_b\| |
-| `complexity_delta_gb` | \|mean_g − mean_b\| |
+|---|---|
+| `mean_complexity` | Average complexity across subject leaves |
+| `std_complexity` | Variance of complexity — tends to be lower in AI images |
+| `min_complexity` | Floor of the complexity distribution |
+| `max_complexity` | Ceiling — almost always 1.0 |
+| `complexity_range` | `max - min` — spread of the distribution |
+| `mean_leaf_area` | Average subject leaf area in pixels |
+| `std_leaf_area` | Variance in leaf area — high values indicate adaptive splitting |
+| `leaf_count` | Total number of subject leaves |
+| `mean_boundary_delta` | Average complexity difference between parent and child nodes |
+| `max_boundary_delta` | Peak boundary jump — a manipulation signal |
+| `mean_depth` | Average tree depth across subject leaves |
+| `std_depth` | Variance in depth |
+| `mean_merge_delta` | Average `std(children) / parent` across all splits — information gain per split |
+| `max_merge_delta` | Peak merge delta — highlights manipulation boundaries |
+| `std_merge_delta` | Variance of merge deltas — high in real images, low in AI |
+| `mean_complexity_r/g/b` | Per-channel mean complexity across subject leaves |
+| `complexity_delta_rg/rb/gb` | Inter-channel complexity divergence |
 
-Per-channel features require passing `image=` and `scorer=` to `extract_features()`. `batch.py` does this automatically. If not provided, all six fields default to 0.0 — fully backwards compatible.
+### Spatial features (256)
 
-Results on the RealVsFake dataset (compression, 161,972 images):
+`tree_grid_000` through `tree_grid_255` — complexity values at each cell of a 16×16
+equivalent spatial grid, sampled at tree depth 4 in Morton order (top-left to bottom-right).
+Cells where the tree stopped early propagate their parent's complexity downward, so the vector
+is always exactly 256 elements regardless of image resolution.
 
-| Config | RF test accuracy | RF CV score |
-|--------|-----------------|-------------|
-| Compression baseline | 90.13% | 88.02% ± 0.26% |
-| Compression + channel complexity | **90.27%** | **88.49% ± 0.11%** |
-
-All six channel features carry non-zero importance in the Random Forest — no dead features. The delta features rank slightly above the raw means, confirming that inter-channel divergence is the more discriminating signal. The absolute delta values are small (mean ~0.005–0.007) but consistent across 161k images, which is enough for the RF to exploit.
-
-**Threshold tuning**
-
-The pruning threshold is a hyperparameter that controls how aggressively low-complexity leaves are collapsed after the full tree is built. Tuning is done without trial and error using `tune_threshold.py`, which builds each quadtree once and sweeps prune cutoffs in memory — making the full sweep as fast as a single batch run.
-
-![Accuracy vs Threshold](./src/results/tune_plots.png)
-
-Key findings from threshold tuning on the RealVsFake dataset:
-
-- **Compression** is nearly flat across the full threshold range (87–88%), with a shallow peak around threshold=35. The signal is robust — the features that matter aren't concentrated in the low-complexity leaves being pruned away, so pruning neither helps nor hurts much.
-- **Shannon** peaks early at threshold=5 and declines steadily. Low-complexity leaves contribute useful signal for Shannon, so pruning them away hurts.
-- **Variance** shows the clearest rise-then-fall shape, peaking around threshold=70. Variance is most affected by noise from near-zero regions; pruning those cleanly improves the signal before the tree becomes too sparse.
-
-**Why the methods diverge — leaf count**
-
-The leaf count plot explains why the three curves behave so differently under pruning:
-
-![Leaf Count vs Threshold](./src/results/leaf_count_vs_threshold.png)
-
-Compression prunes far fewer leaves than Shannon or variance at the same threshold percentile. Its complexity values are tightly clustered — most leaves score similarly — so the bottom 35% of the distribution is only a shallow cut. Shannon and variance have wider, more spread-out distributions, so the same percentile threshold removes significantly more of the tree. This is why compression's accuracy is stable across the full range while the other two methods show a clear sensitivity to threshold choice.
-
-**Accuracy vs leaf count**
-
-Viewing accuracy as a function of tree size rather than threshold percentile reveals the true operating point of each method:
-
-![Accuracy vs Leaf Count](./src/results/accuracy_vs_leaf_count.png)
-
-Compression operates in the upper-right of this space — high accuracy at high leaf count — and barely moves as pruning increases. Variance climbs steeply from the bottom-left as pruning removes noisy near-zero leaves, then plateaus. Shannon starts high but falls away once too many informative leaves are removed. The color encoding (threshold percentile) shows that compression's best points cluster at moderate thresholds (orange/red), while variance's best points are at higher thresholds (yellow/green).
-
-**Leaf size**
-
-`leaf_size` controls the spatial resolution of the quadtree — the minimum side length in pixels at which splitting stops. It is a separate hyperparameter from threshold and affects all three methods differently. Compression has a hard lower bound of `leaf_size=16` because zlib's header overhead dominates at smaller block sizes, making compression ratios unreliable. Shannon and variance work accurately at `leaf_size=4` — a 4px block contains enough pixels for a meaningful entropy or variance calculation, whereas a 1×1 pixel leaf has no relative complexity to measure. Increasing leaf size reduces tree depth and leaf count uniformly, which decreases feature resolution but speeds up both build time and classification. The defaults are chosen to be the smallest reliable value for each method.
-
-**Recommended configuration:** `--method compression --threshold 11` with per-channel features enabled (default), giving **90.3% test accuracy** on the RealVsFake dataset.
+These spatial features capture *where* complexity is concentrated in the image. In practice,
+several specific grid cells (particularly in the lower quadrants) rank among the most
+informative features for AI vs real classification, reflecting the characteristic spatial
+signatures of generative models.
 
 ---
 
-## Known Limitations
+## Typical workflow
 
-- **Shannon entropy** produces a noisy grid at high depth due to statistical artifacts in small blocks. Use `--method compression` or increase `--leaf-size` to mitigate.
-- **Compression scoring** is unreliable at `leaf_size < 16` — zlib header overhead dominates at small block sizes.
-- **Variance normalization** is per-image, so raw feature values are not directly comparable across images processed independently. The relative ordering within an image is preserved.
-- **Boundary nodes** that straddle the subject/background edge are scored on their opaque pixels only, which can produce elevated complexity scores if the subject content in that cell is detailed.
-- **RealVsFake** images are face-centric — results may not generalize to non-portrait subjects without further validation.
-- **Fixed-grid trees** — without `--threshold`, all trees terminate at exactly `leaf_size`, producing a constant `leaf_count` and `mean_depth` across all images. These features carry no information unless adaptive pruning is enabled.
-- **`max_complexity`** is always 1.0 for compression runs and contributes zero importance — safe to drop via `--features` when using `--method compression`.
+```
+real_photos/    ai_images/
+      │               │
+      └─ src/tune_thresholds.py ─┘   ← find optimal --threshold
+                  │                    → results/tuning/{method}.csv
+          src/tune_plots.py           ← visualize the sweep
+                  │                    → results/tuning/*.png
+      ┌───────────┴────────────┐
+src/depth_distribution.py   src/batch.py --threshold <N>
+      │                              │    → results/features/{method}.csv
+      │                              │
+      └──────────────┬───────────────┘
+                     │
+          ┌──────────┼──────────┐
+  src/classify.py  src/scatter.py  (iterate)
+       │                 │
+results/classify/   results/scatter/
+```
+
+A full run from scratch:
+
+```bash
+# 1. Pilot sweep to find the best pruning threshold (~200 images per class)
+python3 src/tune_thresholds.py \
+    --input data/real data/ai \
+    --labels real ai \
+    --method compression --leaf_size 16 \
+    --max_images 200
+python3 src/tune_plots.py
+
+# 2. Verify tree depth is consistent across the dataset
+python3 src/depth_distribution.py \
+    --input data/real data/ai \
+    --labels real ai \
+    --method compression
+
+# 3. Extract features at scale using the tuned threshold
+python3 src/batch.py \
+    --input data/real data/ai \
+    --labels real ai \
+    --output results/features/ \
+    --method compression --leaf_size 16 --threshold 32 --workers 8
+
+# 4. Quick classification check
+python3 src/classify.py results/features/compression.csv --fast --balance
+
+# 5. Prune low-signal features and re-evaluate
+python3 src/classify.py results/features/compression.csv \
+    --fast --balance --prune-features 0.0 --permutation-importance
+
+# 6. Visualize feature separation
+python3 src/scatter.py results/features/compression.csv --auto
+```
 
 ---
 
-## Future Plans
+## Related work
 
-**Near term**
-- ✅ Feature extraction: distill each quadtree into a feature vector exportable as CSV
-- ✅ Scatter plot visualization of feature separation across labeled datasets
-- ✅ Correlation-based pair pruning in scatter --auto to eliminate redundant plots
-- ✅ Variance scorer: fast alternative to compression with adaptive normalization
-- ✅ Resolution-independent splitting via leaf_size
-- ✅ Two-pass percentile pruning for content-adaptive threshold
-- ✅ Lightweight classifier: logistic regression, SVM, random forest, gradient boosting on extracted features
-- ✅ Threshold hyperparameter tuning without trial and error
-- ✅ Full classifier evaluation on RealVsFake 161k dataset — compression RF achieves 90.1%
+This project sits at the intersection of image forensics and complexity analysis. Some relevant
+prior work:
 
-**Medium term**
-- ✅ Per-channel complexity features — inter-channel divergence signal; +0.14% test accuracy, +0.47% CV score on compression
-- ✅ Merge delta histogram — logarithmic bins capture distribution shape; +0.44% RF accuracy on variance
-- Expand dataset: test against FFHQ (real) vs StyleGAN / Stable Diffusion outputs
+**Image forgery detection**
+- Farid, H. (2009). *Image forgery detection*. IEEE Signal Processing Magazine. An early survey
+  of pixel-level manipulation signals — many of the boundary delta and noise inconsistency ideas
+  here are inspired by this line of work.
+- Krawetz, N. *A Picture's Worth: Digital Image Analysis and Forensics* (Black Hat, 2007).
+  Error level analysis (ELA), a precursor to compression-ratio approaches for detecting
+  re-saved or composited regions.
 
-**Longer term**
-- Video pipeline: extract frames, build a complexity tensor across time, measure temporal stability of face-region complexity
-- Audio-visual correlation: score whether facial complexity changes correlate with audio energy — a signal that breaks in dubbed or voice-synthesized deepfakes
-- Benchmark against neural network deepfake detectors on unseen generative architectures — the architecture-agnostic approach should generalize where trained detectors fail
+**AI image detection**
+- Wang, S. Y. et al. (2020). *CNN-generated images are surprisingly easy to spot... for now.*
+  CVPR. Establishes that low-level frequency artifacts in GAN outputs are detectable; the
+  compression-ratio method here captures related repetition artifacts without requiring a
+  learned detector.
+- Corvi, R. et al. (2023). *On the detection of synthetic images generated by diffusion models.*
+  ICASSP. Notes that diffusion model outputs are harder to detect than GAN outputs by
+  frequency-domain methods — motivating the spatial complexity map approach here.
 
----
-
-## Related Work
-
-**Synthbuster** (2024) is the closest non-neural approach in the literature. It applies a cross-difference filter to highlight periodic artifacts in synthetic images, then extracts spectral features in the frequency domain and classifies them using gradient boosting. It targets GAN-specific upsampling artifacts — a different signal and a different domain from complexity-based analysis. Unlike Synthbuster, this project makes no assumptions about the generative architecture.
-
-General frequency-domain analysis has shown that GAN-generated images exhibit periodic spectral artifacts caused by upsampling operations. Compression-based complexity is architecture-agnostic by design and does not rely on these artifacts, which may not be present in diffusion-model outputs.
+**Quadtree image analysis**
+- Samet, H. (1984). *The quadtree and related hierarchical data structures.* ACM Computing
+  Surveys. Foundational reference for quadtree spatial decomposition.
+- Hurtut, T. et al. (2008). *Image description using the complexity of its local structures.*
+  ICPR. Uses recursive subdivision complexity as an image descriptor — the direct conceptual
+  ancestor of the tree-grid feature here.
 
 ---
 
-## Background
+## Known limitations
 
-The theoretical grounding for this project is Kolmogorov complexity — the length of the shortest program that produces a given output. True Kolmogorov complexity is uncomputable (proven via reduction to the halting problem), but compression ratio provides a computable upper bound. The project explores how far this approximation can take a practical detector.
+**Resolution sensitivity.** The quadtree is built with a fixed `leaf_size` in pixels, so
+complexity scores and tree depth vary with image resolution. Images of very different sizes
+should be normalised before comparison, or the same resolution dataset should be used for
+training and inference.
 
-The spatial distribution of complexity — not just a single score — is where the signal lives. A deepfake has a specific quadtree signature: a low-variance complexity island (the generated face) surrounded by a high-delta boundary ring, embedded in naturally varying terrain. That pattern is rare in unmanipulated photographs and detectable without any knowledge of the generative model that produced it.
+**JPEG compression artifacts.** Heavily compressed JPEGs inflate compression-ratio scores
+in low-complexity regions (smooth areas accumulate block artifacts). This can make compressed
+real photos look more like AI images under the compression method. Using `--method shannon`
+or ensuring consistent JPEG quality across the dataset mitigates this.
+
+**Cropped or composited subjects.** The alpha-channel background detection works well for
+images with clean cutouts, but degrades for images where the subject bleeds into a complex
+background. In those cases, background leaf complexity contaminates the subject feature vector.
+
+**Generative model drift.** The spatial complexity signatures of AI generators change with
+architecture. A classifier trained on outputs from one model family (e.g. Stable Diffusion 1.x)
+may not generalise to newer architectures (FLUX, SD3, Midjourney v6) without retraining on
+updated examples. The feature set is architecture-agnostic, but the decision boundary is not.
+
+**Class imbalance and dataset bias.** Permutation importance and classifier accuracy are both
+sensitive to the composition of the training set. A dataset dominated by one image subject
+type (e.g. portraits) will produce a classifier that may not generalise to landscapes or
+product shots. The `--balance` flag helps with class size imbalance but not subject-type bias.
+
+**Photoshopping is a spectrum.** Minor retouching (skin smoothing, colour grading) produces
+subtle signals that overlap with natural variation in real photos. Heavy compositing is easier
+to detect. The three-class problem (real / AI / photoshopped) is significantly harder than
+binary real vs AI, and current accuracy on the photoshopped class tends to be lower.
+
+**`max_complexity` is a dead feature.** Because the quadtree always contains at least one
+maximally complex leaf, `max_complexity` is almost always 1.0 for every image regardless of
+class. It should be excluded from classifier training (or will be automatically dropped by
+`--prune-features 0.0`).
+
+---
+
+## Supported image formats
+
+`.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.webp`
+
+RGBA images are supported — transparent regions are detected via the alpha channel and
+excluded from complexity scoring and feature statistics.

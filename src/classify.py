@@ -14,22 +14,35 @@ Default — four classifiers:
   2. Random Forest
 
 Usage:
-    python3 classify.py results/features.csv
-    python3 classify.py results/features.csv --fast
-    python3 classify.py results/features.csv --test-size 0.2
-    python3 classify.py results/features.csv --features mean_complexity std_complexity
-    python3 classify.py results/features.csv --balance
-    python3 classify.py results/features.csv --purmutation-importance
+    python3 src/classify.py results/features/compression.csv
+    python3 src/classify.py results/features/compression.csv --fast
+    python3 src/classify.py results/features/compression.csv --test-size 0.2
+    python3 src/classify.py results/features/compression.csv --features mean_complexity std_complexity
+    python3 src/classify.py results/features/compression.csv --balance
+    python3 src/classify.py results/features/compression.csv --permutation-importance
+    python3 src/classify.py results/features/compression.csv --prune-features 0.0
+    python3 src/classify.py results/features/compression.csv --prune-features 0.0005
+
+--prune-features THRESHOLD
+    Fits a Random Forest on the full feature set, computes permutation
+    importance, then discards any feature whose mean permutation importance
+    is below THRESHOLD (default 0.0 drops only features that actively hurt
+    accuracy). The remaining classifiers then train on the pruned set.
 
 Output:
     Console report: accuracy, precision, recall, F1, confusion matrix
-    classify_results.txt saved alongside the CSV
+    results/classify/{csv_stem}.txt  (e.g. results/classify/compression.txt)
 """
 
 import argparse
 import os
 import sys
 import numpy as np
+import joblib
+
+# Allow running from project root as: python3 src/classify.py
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -61,10 +74,10 @@ CLASSIFIERS_FAST = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate classifiers on quadtree features.")
-    parser.add_argument("csv", help="Path to features.csv produced by batch.py")
+    parser.add_argument("csv", help="Path to features CSV, e.g. results/features/compression.csv")
     parser.add_argument("--output", default=None,
-                        help="Path to save results text file. Defaults to classify_results.txt "
-                             "alongside the CSV.")
+                        help="Path to save results text file. "
+                             "Default: results/classify/{csv_stem}.txt")
     parser.add_argument("--test-size", type=float, default=0.2,
                         help="Fraction of data to use for testing (default: 0.2)")
     parser.add_argument("--features", nargs="+", default=FEATURE_COLS,
@@ -79,6 +92,12 @@ def parse_args():
                        help="Compute permutation importance for Random Forest in addition "
                        "to impurity-based importance. Slower but more reliable for "
                        "correlated features.")
+    parser.add_argument("--prune-features", type=float, default=None, metavar="THRESHOLD",
+                       help="Fit a Random Forest on the full feature set, compute permutation "
+                       "importance, then drop any feature whose mean importance is below "
+                       "THRESHOLD before running the main classifiers. "
+                       "Use 0.0 to drop only features that actively hurt accuracy; "
+                       "higher values (e.g. 0.0005) prune more aggressively.")
     return parser.parse_args()
 
 
@@ -217,8 +236,64 @@ def evaluate(name, clf,
     return "\n".join(lines), acc
 
 
+def prune_features(
+    x_train: np.ndarray,
+    x_test: np.ndarray,
+    y_train: np.ndarray,
+    y_test: np.ndarray,
+    feature_cols: list,
+    threshold: float,
+    n_repeats: int = 10,
+) -> tuple:
+    """
+    Fit a Random Forest, compute permutation importance, and return
+    (kept_cols, dropped_cols, report).
+
+    Features with mean permutation importance >= threshold are kept.
+    Use threshold=0.0 to drop only features that actively hurt accuracy.
+    """
+    print(f"Pruning features (threshold={threshold})...")
+    probe = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    probe.fit(x_train, y_train)
+    result = permutation_importance(
+        probe, x_test, y_test,
+        n_repeats=n_repeats, random_state=42, n_jobs=-1
+    )
+
+    pairs = sorted(
+        zip(feature_cols, result.importances_mean, result.importances_std),
+        key=lambda t: -t[1]
+    )
+
+    kept_cols, dropped_cols = [], []
+    for feat, mean, _ in pairs:
+        if mean >= threshold:
+            kept_cols.append(feat)
+        else:
+            dropped_cols.append(feat)
+
+    lines = [
+        f"\nFeature pruning  (RF permutation importance, threshold={threshold})",
+        f"  Kept {len(kept_cols)} / {len(feature_cols)} features  "
+        f"(dropped {len(dropped_cols)})",
+    ]
+    if dropped_cols:
+        lines.append("  Dropped:")
+        for feat, mean, std in pairs:
+            if feat in dropped_cols:
+                lines.append(f"    {feat:<25}  {mean:+.4f} ± {std:.4f}")
+
+    # Preserve original column order
+    kept_ordered = [f for f in feature_cols if f in set(kept_cols)]
+    return kept_ordered, dropped_cols, "\n".join(lines)
+
+
 def main():
     args = parse_args()
+
+    # WSL cannot fork the memory-mapped worker processes joblib uses by default.
+    # Force threading backend globally so all n_jobs=-1 calls share memory.
+    joblib.parallel_backend("threading", n_jobs=-1)
 
     if not os.path.exists(args.csv):
         print(f"Error: file not found: {args.csv}")
@@ -241,6 +316,30 @@ def main():
     x_train_s = scaler.fit_transform(x_train)
     x_test_s  = scaler.transform(x_test)
 
+    # --- Optional feature pruning -----------------------------------------
+    prune_report = ""
+    feature_cols = list(args.features)
+
+    if args.prune_features is not None:
+        kept, dropped, prune_report = prune_features(
+            x_train, x_test, y_train, y_test,
+            feature_cols, threshold=args.prune_features
+        )
+        print(prune_report)
+        if not kept:
+            print("Error: all features were pruned — lower the threshold.")
+            sys.exit(1)
+
+        kept_idx   = [feature_cols.index(f) for f in kept]
+        x_train    = x_train[:, kept_idx]
+        x_test     = x_test[:, kept_idx]
+        x_train_s  = x_train_s[:, kept_idx]
+        x_test_s   = x_test_s[:, kept_idx]
+        feature_cols = kept
+        print(f"Continuing with {len(kept)} features.\n")
+    # ----------------------------------------------------------------------
+
+    print(f"Features ({len(feature_cols)}): {feature_cols}")
     print(f"\nTrain: {len(y_train)}  Test: {len(y_test)}\n")
 
     classifiers = CLASSIFIERS_FAST if args.fast else CLASSIFIERS_FULL
@@ -249,12 +348,14 @@ def main():
     all_lines = [
         f"Classification Report ({mode} mode)",
         f"CSV: {args.csv}",
-        f"Features: {args.features}",
+        f"Features ({len(feature_cols)}): {feature_cols}",
         f"Train/test split: {1-args.test_size:.0%} / {args.test_size:.0%}",
         f"Balanced: {args.balance}",
         "",
-        outlier_report
+        outlier_report,
     ]
+    if prune_report:
+        all_lines.append(prune_report)
 
     results = []
     cv = StratifiedKFold(n_splits=args.cv, shuffle=True, random_state=42)
@@ -268,7 +369,7 @@ def main():
             x_tr, x_te = x_train_s, x_test_s
         cv_scores = cross_val_score(clf, x_tr, y_train, cv=cv, scoring="accuracy", n_jobs=-1)
         perm_imp = getattr(args, "permutation_importance", False)
-        report, acc = evaluate(name, clf, x_tr, x_te, y_train, y_test, args.features, cv_scores)
+        report, acc = evaluate(name, clf, x_tr, x_te, y_train, y_test, feature_cols, cv_scores, perm_imp)
         print(f"accuracy={acc:.4f}")
         all_lines.append(report)
         results.append((name, acc))
@@ -287,7 +388,12 @@ def main():
     if args.output:
         out_path = args.output
     else:
-        out_path = os.path.join(os.path.dirname(args.csv), "classify_results.txt")
+        # Derive name from the CSV stem and write into results/classify/
+        # e.g. results/features/compression_spatial_map.csv -> results/classify/compression_spatial_map.txt
+        csv_stem = os.path.splitext(os.path.basename(args.csv))[0]
+        out_path = os.path.join("results", "classify", f"{csv_stem}.txt")
+    
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     
     with open(out_path, "w") as f:
         f.write(report_text)

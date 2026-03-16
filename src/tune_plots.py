@@ -1,8 +1,8 @@
 """
 tune_plots.py
 
-Generate threshold tuning visualizations from tune_threshold.py CSV output.
-Reads results/tune_threshold/tune_results_{method}.csv and produces three plots:
+Generate threshold tuning visualizations from tune_thresholds.py CSV output.
+Reads results/tuning/{method}.csv and produces three plots:
 
     1. accuracy_vs_threshold   — CV accuracy vs pruning percentile, with
                                  confidence bands and best-point markers
@@ -12,20 +12,70 @@ Reads results/tune_threshold/tune_results_{method}.csv and produces three plots:
                                  threshold percentile via plasma colormap
 
 Usage:
-    python3 tune_plots.py
+    # Default: reads results/tuning/{shannon,compression,variance}.csv
+    python3 src/tune_plots.py
+    
+    # Explicit input files
+    python3 src/tune_plots.py --input results/tuning/compression.csv
+    
+    # Multiple files
+    python3 src/tune_plots.py \
+        --input results/tuning/compression.csv results/tuning/compression_spatial_map.csv
+    
+    # Custom output folder (default: results/tuning/)
+    python3 src/tune_plots.py --output results/tuning/
 
-Output:
-    results/tune_threshold/tune_plots.png
-    results/tune_threshold/leaf_count_vs_threshold.png
-    results/tune_threshold/accuracy_vs_leaf_count.png
+Output (three PNGs written to output folder):
+    accuracy_vs_thresholds.png
+    leaf_count_vs_thresholds.png
+    accuracy_vs_leaf_count.png
 """
 
+import argparse
+import itertools
+import os
+import sys
 import matplotlib.pyplot as plt
 import csv
 import numpy as np
 
-def accuracy_vs_threshold():
-    fig, ax = plt.subplots(figsize=(9, 5), facecolor="#111")
+PLOT_COLORS = ["steelblue", "tomato", "mediumseagreen", "orchid", "orange", "cyan"]
+DEFAULT_METHODS = ["shannon", "compression", "variance"]
+DEFAULT_INPUT_DIR = "results/tuning"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Plot threshold tuning results.")
+    parser.add_argument(
+        "--input", nargs="+", default=None,
+        help="One or more tuning CSVs. If omitted, reads "
+             "results/tuning/{shannon,compression,variance}.csv automatically."
+    )
+    parser.add_argument(
+        "--output", default=None,
+        help="Output folder for plots. Default: results/tuning/"
+    )
+    return parser.parse_args()
+
+
+def label_from_path(path: str) -> str:
+    """
+    Derive a short legend label from a CSV filename.
+
+    compression.csv              -> compression
+    compression_spatial_map.csv  -> compression_spatial_map
+    anything_else.csv            -> anything_else
+    """
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def load_csv(path: str) -> list:
+    with open(path, mode="r") as f:
+        return list(csv.DictReader(f))
+
+
+def _styled_ax(fig, ax):
+    """Apply dark theme styling to an axes."""
     ax.set_facecolor("#1a1a1a")
     ax.tick_params(colors="white")
     ax.xaxis.label.set_color("white")
@@ -34,133 +84,165 @@ def accuracy_vs_threshold():
     for spine in ax.spines.values():
         spine.set_edgecolor("#444")
     ax.grid(True, color="#333", linewidth=0.5)
+
+
+def accuracy_vs_threshold(datasets: list, output_dir: str):
+    """datasets: list of (label, rows) tuples."""
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor="#111")
+    _styled_ax(fig, ax)
     
-    # import csv
-    METHODS = ["shannon", "compression", "variance"]
-    COLORS = ["steelblue", "tomato", "mediumseagreen"]
-    
-    for method, color in zip(METHODS, COLORS):
-        path = "./results/tune_threshold/tune_results_" + method + ".csv"
-        with open(path, mode="r") as f:
-            rows = list(csv.DictReader(f))
-    
+    for (label, rows), color in zip(datasets, itertools.cycle(PLOT_COLORS)):
         thresholds  = [float(r["threshold"]) for r in rows]
         accuracies  = [float(r["cv_accuracy_mean"]) for r in rows]
         std         = [float(r["cv_accuracy_std"]) for r in rows]
     
-        ax.plot(thresholds, accuracies, color=color, linewidth=2, marker="o", label=method)
-
+        ax.plot(thresholds, accuracies, color=color, linewidth=2, marker="o", label=label)
         upper = [m + s for m, s in zip(accuracies, std)]
         lower = [m - s for m, s in zip(accuracies, std)]
         ax.fill_between(thresholds, lower, upper, color=color, alpha=0.15)
         
         best_i = accuracies.index(max(accuracies))
         ax.axvline(thresholds[best_i], color=color, linestyle="--", linewidth=1, alpha = 0.5)
-        ax.annotate(f"best={thresholds[best_i]}",
-                    xy=(thresholds[best_i], accuracies[best_i]),
-                    xytext=(thresholds[best_i] + 0.75, accuracies[best_i] + 0.001),
-                    color=color, fontsize=9)
+        ax.annotate(
+            f"best={thresholds[best_i]}",
+            xy=(thresholds[best_i], accuracies[best_i]),
+            xytext=(thresholds[best_i] + 0.75, accuracies[best_i] + 0.001),
+            color=color, fontsize=9
+        )
     
     ax.set_xlim(0, 100)
     ax.set_xlabel("Threshold")
     ax.set_ylabel("CV Accuracy")
     ax.set_title("Accuracy vs Threshold")
     ax.legend(facecolor="#222", labelcolor="white", edgecolor="#444")
-    
-    plt.savefig("./results/tune_threshold/tune_plots.png", dpi=150, bbox_inches="tight", facecolor="#111")
+    out = os.path.join(output_dir, "accuracy_vs_thresholds.png")
+    plt.savefig(out, dpi=150, bbox_inches="tight", facecolor="#111")
+    plt.close()
+    print(f"Saved: {out}")
 
 
-def leaf_count_vs_threshold():
+def leaf_count_vs_threshold(datasets: list, output_dir: str):
     fig, ax = plt.subplots(figsize=(9, 5), facecolor="#111")
-    ax.set_facecolor("#1a1a1a")
-    ax.tick_params(colors="white")
-    ax.xaxis.label.set_color("white")
-    ax.yaxis.label.set_color("white")
-    ax.title.set_color("white")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#444")
-    ax.grid(True, color="#333", linewidth=0.5)
-
-    METHODS = ["shannon", "compression", "variance"]
-    COLORS  = ["steelblue", "tomato", "mediumseagreen"]
-
-    for method, color in zip(METHODS, COLORS):
-        path = "./results/tune_threshold/tune_results_" + method + ".csv"
-        with open(path, mode="r") as f:
-            rows = list(csv.DictReader(f))
-
-        thresholds  = [float(r["threshold"]) for r in rows]
+    _styled_ax(fig, ax)
+    
+    all_max_leaves = []
+    for(label, rows), color in zip(datasets, itertools.cycle(PLOT_COLORS)):
+        thresholds = [float(r["threshold"]) for r in rows]
         mean_leaves = [float(r["mean_leaves"]) for r in rows]
-
-        ax.plot(thresholds, mean_leaves, color=color, linewidth=2, marker="o", label=method)
-
-    # Horizontal reference line at the full unprunded leaf count
-    ax.axhline(1387, color="#888", linestyle=":", linewidth=1)
-    ax.annotate("full grid (no pruning)", xy=(1, 1387),
-                xytext=(1, 1387 + 5),
-                color="#888", fontsize=8)
-
+        all_max_leaves.append(max(mean_leaves))
+        ax.plot(thresholds, mean_leaves, color=color, linewidth=2, marker="o", label=label)
+    
+    # Reference line at the maximum unpruned leaf count across all datasets
+    full_grid = max(all_max_leaves)
+    ax.axhline(full_grid, color="#888", linestyle=":", linewidth=1)
+    ax.annotate(
+        "full grid (no pruning)",
+        xy=(1, 1387),
+        xytext=(1, 1387 + 5),
+        color="#888",
+        fontsize=8
+    )
+    
     ax.set_xlim(0, 100)
     ax.set_xlabel("Threshold")
     ax.set_ylabel("Mean Subject Leaves")
     ax.set_title("Leaf Count vs Threshold")
     ax.legend(facecolor="#222", labelcolor="white", edgecolor="#444")
+    out = os.path.join(output_dir, "leaf_count_vs_thresholds.png")
+    plt.savefig(out, dpi=150, bbox_inches="tight", facecolor="#111")
+    plt.close()
+    print(f"saved: {out}")
 
-    plt.savefig("./results/tune_threshold/leaf_count_vs_threshold.png", dpi=150, bbox_inches="tight", facecolor="#111")
 
-
-def accuracy_vs_leaf_count():
+def accuracy_vs_leaf_count(datasets: list, output_dir: str):
     fig, ax = plt.subplots(figsize=(9, 5), facecolor="#111")
-    ax.set_facecolor("#1a1a1a")
-    ax.tick_params(colors="white")
-    ax.xaxis.label.set_color("white")
-    ax.yaxis.label.set_color("white")
-    ax.title.set_color("white")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#444")
-    ax.grid(True, color="#333", linewidth=0.5)
-
-    METHODS = ["shannon", "compression", "variance"]
-    COLORS  = ["steelblue", "tomato", "mediumseagreen"]
-
-    for method, color in zip(METHODS, COLORS):
-        path = "./results/tune_threshold/tune_results_" + method + ".csv"
-        with open(path, mode="r") as f:
-            rows = list(csv.DictReader(f))
-
+    _styled_ax(fig, ax)
+    
+    sc = None
+    for (label, rows), color in zip(datasets, itertools.cycle(PLOT_COLORS)):
         thresholds  = [float(r["threshold"]) for r in rows]
         mean_leaves = [float(r["mean_leaves"]) for r in rows]
         accuracies  = [float(r["cv_accuracy_mean"]) for r in rows]
 
-        # Scatter coloured by threshold value so you can still read the progression
-        sc = ax.scatter(mean_leaves, accuracies, c=thresholds, cmap="plasma",
-                        s=50, edgecolors=color, linewidths=1.2, label=method, zorder=3)
+        sc = ax.scatter(
+            mean_leaves,
+            accuracies,
+            c=thresholds,
+            cmap="plasma",
+            s=50,
+            edgecolors=color,
+            linewidths=1.2,
+            label=label,
+            zorder=3
+        )
         ax.plot(mean_leaves, accuracies, color=color, linewidth=1, alpha=0.4)
 
         best_i = accuracies.index(max(accuracies))
-        ax.annotate(f"{method}\nthr={thresholds[best_i]:.0f}",
-                    xy=(mean_leaves[best_i], accuracies[best_i]),
-                    xytext=(mean_leaves[best_i] + 5, accuracies[best_i] + 0.001),
-                    color=color, fontsize=8)
-
-    cbar = fig.colorbar(sc, ax=ax)
-    cbar.set_label("Threshold percentile", color="white")
-    cbar.ax.yaxis.set_tick_params(color="white")
-    plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
+        ax.annotate(
+            f"{label}\nthr={thresholds[best_i]:.0f}",
+            xy=(mean_leaves[best_i], accuracies[best_i]),
+            xytext=(mean_leaves[best_i] + 5, accuracies[best_i] + 0.001),
+            color=color, fontsize=8
+        )
+    
+    if sc is not None:
+        cbar = fig.colorbar(sc, ax=ax)
+        cbar.set_label("Threshold percentile", color="white")
+        cbar.ax.yaxis.set_tick_params(color="white")
+        plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
 
     ax.set_xlabel("Mean Subject Leaves")
     ax.set_ylabel("CV Accuracy")
     ax.set_title("Accuracy vs Leaf Count")
     ax.legend(facecolor="#222", labelcolor="white", edgecolor="#444")
-
-    plt.savefig("./results/tune_threshold/accuracy_vs_leaf_count.png", dpi=150, bbox_inches="tight", facecolor="#111")
+    out = os.path.join(output_dir, "accuracy_vs_leaf_count.png")
+    plt.savefig(out, dpi=150, bbox_inches="tight", facecolor="#111")
+    plt.close()
+    print(f"Saved: {out}")
 
 
 def main():
-    accuracy_vs_threshold()
-    leaf_count_vs_threshold()
-    accuracy_vs_leaf_count()
+    args = parse_args()
+    
+    # Resolve input file list
+    if args.input:
+        paths = args.input
+    else:
+        paths = [
+            os.path.join(DEFAULT_INPUT_DIR, f"{m}.csv")
+            for m in DEFAULT_METHODS
+        ]
+        paths = [p for p in paths if os.path.exists(p)]
+        if not paths:
+            print(f"No default CSVs found in {DEFAULT_INPUT_DIR}. Use --input to specify files.")
+            return
+    
+    # Load datasets
+    datasets = []
+    for path in paths:
+        if not os.path.exists(path):
+            print(f"Warning: file not found, skipping: {path}")
+            continue
+        label = label_from_path(path)
+        rows = load_csv(path)
+        datasets.append((label, rows))
+        print(f"Loaded {len(rows)} rows from {os.path.basename(path)} ({label})")
 
+    if not datasets:
+        print("No data loaded — nothing to plot.")
+        return
+
+    # Resolve output directory
+    if args.output:
+        output_dir = args.output.rstrip("/")
+    else:
+        output_dir = DEFAULT_INPUT_DIR
+    os.makedirs(output_dir, exist_ok=True)
+
+    accuracy_vs_threshold(datasets, output_dir)
+    leaf_count_vs_threshold(datasets, output_dir)
+    accuracy_vs_leaf_count(datasets, output_dir)
+        
 
 if __name__ == "__main__":
     main()

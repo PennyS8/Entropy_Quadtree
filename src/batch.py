@@ -7,28 +7,29 @@ Overlay rendering is disabled; use main.py for single image overlays.
 
 Usage:
     # Single folder
-    python3 batch.py --input my_images --labels unlabeled --output results/features.csv
+    python3 src/batch.py --input my_images --labels unlabeled --output results/features/
     
     # Multiple folders in one run — builds a labeled dataset in a single pass
-    python3 batch.py --input real_photos ai_images --labels real ai --output results/features_compression.csv
+    python3 src/batch.py --input real_photos ai_images --labels real ai --output results/features/
     
     # Append a new class to an existing CSV
-    python3 batch.py --input photoshopped --labels photoshopped --output results/features_compression.csv --append
+    python3 src/batch.py --input photoshopped --labels photoshopped --output results/features/compression.csv --append
     
     # Parallel processing
-    python3 batch.py --input real_photos ai_images --labels real ai --output results/features_compression.csv --workers 8
+    python3 src/batch.py --input real_photos ai_images --labels real ai --output results/features/ --workers 8
 
 Required args:
     --input     one or more input folders of images
     --labels    one label per folder, same order as --input (e.g. real ai photoshopped)
     --output    path for the output CSV file, or a folder — if a folder or path ending
-                in '/' is given, the file is auto-named features_{method}.csv inside it
+                in '/' is given, the file is auto-named {method}.csv inside it
 
 Optional args:
     --method      shannon|compression|variance  (default: shannon)
     --leaf_size   int     target leaf side length in pixels (default: 4)
     --threshold   float   percentile pruning cutoff, default off
-    --append              append to existing features.csv instead of overwriting
+    --append              append to existing CSV instead of overwriting
+    --max_images  int     max images per input folder (default: all)
     --workers     int     number of parallel workers (default: 1)
 """
 
@@ -39,6 +40,9 @@ import sys
 import numpy as np
 from PIL import Image
 from multiprocessing import Pool, cpu_count
+
+# Allow running from project root as: python3 src/batch.py
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from complexity import get_scorer
 from quadtree import QuadTree
@@ -57,13 +61,16 @@ def parse_args():
     parser.add_argument("--output", required=True,
                         help="Output path for features CSV, or a folder. "
                         "If a folder (or path ending in /), auto-names to "
-                        "features_{method}.csv inside it.")
+                        "{method}.csv inside it. e.g. results/features/")
     parser.add_argument("--method", choices=["shannon", "compression", "variance"], default="shannon")
     parser.add_argument("--leaf_size", type=int, default=4,
                         help="Target leaf side length in pixels. (default: 4)")
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--append", action="store_true",
-                        help="Append to existing features.csv instead of overwriting")
+                        help="Append to existing CSV instead of overwriting")
+    parser.add_argument("--max_images", type=int, default=None,
+                        help="Max images to process per input folder (default: all). "
+                             "Useful for fast pilot runs before committing to the full dataset.")
     parser.add_argument("--workers", type=int, default=1,
                         help=f"Number of parallel workers (default: 1, max: {cpu_count()})")
     return parser.parse_args()
@@ -74,14 +81,14 @@ def resolve_output_path(output_arg: str, method: str) -> str:
     Resolve --output to a concrete CSV path
 
     - Ends in .csv          -> use as-is
-    - Ends in / or is a dir -> auto-name features_{method}.csv inside it
+    - Ends in / or is a dir -> auto-name {method}.csv inside it
     - Anything else         -> use as-is
     """
     if output_arg.endswith(".csv"):
         return output_arg
     stripped = output_arg.rstrip("/").rstrip(os.sep)
     if output_arg.endswith("/") or output_arg.endswith(os.sep) or os.path.isdir(output_arg):
-        return os.path.join(stripped, "features_{}.csv".format(method))
+        return os.path.join(stripped, "{}.csv".format(method))
     return output_arg
 
 
@@ -125,7 +132,8 @@ def process_image(args_tuple):
         )
 
         root = qt.build(image_array, alpha=alpha, normalize=not no_overlay)
-        feat = extract_features(root, filename, label=label, image=image_array, scorer=scorer)
+        feat = extract_features(root, filename, label=label, image=image_array,
+                                scorer=scorer, img_shape=image_array.shape[:2])
 
         if not no_overlay:
             save_result(
@@ -170,7 +178,9 @@ def main():
         if not entries:
             print(f"Warning: no supported images found in '{folder}', skipping.")
             continue
-        print(f"Found {len(entries)} image(s) in '{folder} (label: {label})")
+        if args.max_images:
+            entries = entries[:args.max_images]
+        print(f"Found {len(entries)} image(s) in '{folder}' (label: {label})")
         for filename in entries:
             input_path = os.path.join(folder, filename)
             tasks.append((
@@ -186,7 +196,6 @@ def main():
     print(f"\nTotal: {len(tasks)} images\n")
     
     # Load existing features if appending
-    features_path = args.output
     if args.append and os.path.exists(features_path):
         existing_dicts = load_csv(features_path)
         print(f"Appending to existing {len(existing_dicts)} entries in features.csv\n")

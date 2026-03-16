@@ -3,26 +3,36 @@ scatter.py
 ----------
 Visualize extracted features across a labeled dataset.
 
-Reads a CSV produced by features.py and generates scatter plots
+Reads a CSV produced by batch.py and generates scatter plots
 showing how well complexity features separate image classes.
 
 Usage:
-    python3 scatter.py features.csv
-    python3 scatter.py features.csv --x mean_complexity --y std_complexity
-    python3 scatter.py features.csv --auto # generate all feature pair plots
-    python3 scatter.py features.csv --auto --output results/scatter/
+    python3 src/scatter.py results/features/compression.csv
+    python3 src/scatter.py results/features/compression.csv --x mean_complexity --y std_complexity
+    python3 src/scatter.py results/features/compression.csv --auto
+    python3 src/scatter.py results/features/compression.csv --auto --top-features 15
+    python3 src/scatter.py results/features/compression.csv --auto --output results/scatter/compression
+
+--auto mode ranks all features by ANOVA F-statistic (how well each feature
+separates the classes) and greedily selects the top N that are also mutually
+uncorrelated with each other. This keeps the output focused on the features
+that carry independent discriminative signal. Use --top-features to control N.
+For unlabeled data, features are ranked by variance instead.
 
 Output:
-    Single plot:    <o>/scatter_<method>.png (or scatter_<method>.png alongside CSV)
-    --auto:         <o>/<x>_vs_<y>.png         (or scatter_plots_<method>/<x>_vs_<y>.png)
-
+    Single plot:  results/scatter/{csv_stem}/scatter_{csv_stem}.png
+    --auto:       results/scatter/{csv_stem}/{x}_vs_{y}.png
 """
 
 import argparse
 import csv
 import os
+import sys
 import numpy as np
 from PIL import Image, ImageDraw
+
+# Allow running from project root as: python3 src/scatter.py
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from features import FEATURE_FIELDS
 
@@ -37,26 +47,31 @@ LABEL_COLORS = {
 
 NUMERIC_FEATURES = [f for f in FEATURE_FIELDS if f not in ("filename", "label", "leaf_count")]
 
-# Pruned feature pairs — drop mirrors, x_vs_x, dead features,
-# and pairs that are known to be redundant from analysis
+# Always exclude — zero or near-zero variance across all images regardless of class
 DEAD = {"max_complexity", "mean_leaf_area", "std_leaf_area", "mean_depth", "std_depth", "leaf_count"}
-        
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Scatter plot of image complexity features.")
-    parser.add_argument("csv", help="Path to features CSV")
+    parser.add_argument("csv", help="Path to features CSV, e.g. results/features/compression.csv")
     parser.add_argument("--x", default="mean_complexity",
-                        help=f"X axis feature (default: mean_complexity)")
+                        help="X axis feature for single plot (default: mean_complexity)")
     parser.add_argument("--y", default="std_complexity",
-                        help=f"Y axis feature (default: std_complexity)")
+                        help="Y axis feature for single plot (default: std_complexity)")
     parser.add_argument("--output", default=None,
-                        help="Output folder for plot(s). Defaults to alongside the CSV "
-                             "for single plots, or scatter_plots_<method>/ for --auto.")
+                        help="Output folder for plot(s). "
+                             "Default: results/scatter/{csv_stem}/")
     parser.add_argument("--auto", action="store_true",
-                        help="Generate scatter plots for all feature pairs")
+                        help="Generate scatter plots for the top N feature pairs, ranked by "
+                             "class separability (ANOVA F-statistic). Use --top-features to "
+                             "control how many features are included.")
+    parser.add_argument("--top-features", type=int, default=10,
+                        help="Number of top-ranked features to include in --auto mode. "
+                             "Pairs of these features are plotted (default: 10, giving 45 plots). "
+                             "Increase for broader coverage, decrease for tighter focus.")
     parser.add_argument("--corr-threshold", type=float, default=0.9,
                         help="Skip pairs whose Pearson |r| exceeds this value (default 0.9). "
-                        "Lower = more aggressive pruning. Only applies to --auto.")
+                             "Lower = more aggressive pruning. Only applies to --auto.")
     return parser.parse_args()
 
 
@@ -73,6 +88,71 @@ def load_data(csv_path: str) -> list:
     return rows
 
 
+def select_top_features(rows: list, feature_cols: list, n: int, corr_threshold: float) -> tuple:
+    """
+    Select the top N features by class separability (ANOVA F-statistic),
+    using a greedy approach that enforces mutual decorrelation during selection
+    rather than as a post-filter.
+
+    Algorithm:
+        1. Score all features by F-statistic (or variance if single class).
+        2. Take the highest-scoring feature unconditionally.
+        3. For each remaining feature in score order, only add it if its
+           Pearson |r| with every already-selected feature is below
+           corr_threshold.
+        4. Stop when N features are selected or candidates are exhausted.
+
+    This guarantees the selected set is mutually uncorrelated, so the
+    correlation filter in --auto mode will never discard all pairs.
+
+    Returns:
+        selected:   list of selected feature names (up to N)
+        ranked:     full ranked list of (feature, score) for all candidates
+        rank_method: string describing the scoring method used
+    """
+    from sklearn.feature_selection import f_classif
+
+    labels = [row.get("label", "").strip() for row in rows]
+    unique_labels = set(labels) - {""}
+    x = np.array([[row[f] for f in feature_cols] for row in rows], dtype=float)
+
+    if len(unique_labels) >= 2:
+        y = np.array(labels)
+        f_scores, _ = f_classif(x, y)
+        f_scores = np.nan_to_num(f_scores, nan=0.0)
+        ranked = sorted(zip(feature_cols, f_scores.tolist()), key=lambda t: -t[1])
+        rank_method = "ANOVA F-statistic"
+    else:
+        variances = np.var(x, axis=0)
+        ranked = sorted(zip(feature_cols, variances.tolist()), key=lambda t: -t[1])
+        rank_method = "variance (single class — no label separation available)"
+
+    # Precompute column index map for fast lookup
+    col_idx = {f: i for i, f in enumerate(feature_cols)}
+
+    selected = []
+    for feat, _ in ranked:
+        if len(selected) >= n:
+            break
+        feat_vals = x[:, col_idx[feat]]
+        if feat_vals.std() == 0:
+            continue
+        # Check correlation against every already-selected feature
+        correlated = False
+        for sel in selected:
+            sel_vals = x[:, col_idx[sel]]
+            if sel_vals.std() == 0:
+                continue
+            r = float(np.corrcoef(feat_vals, sel_vals)[0, 1])
+            if abs(r) >= corr_threshold:
+                correlated = True
+                break
+        if not correlated:
+            selected.append(feat)
+
+    return selected, ranked, rank_method
+
+
 def filter_correlated_pairs(pairs: list, rows: list, threshold: float) -> tuple:
     """
     Remove pairs where |Pearson r| >= threshold.
@@ -82,11 +162,11 @@ def filter_correlated_pairs(pairs: list, rows: list, threshold: float) -> tuple:
     for x_field, y_field in pairs:
         x_vals = np.array([r[x_field] for r in rows], dtype=float)
         y_vals = np.array([r[y_field] for r in rows], dtype=float)
-        # Pearson r: guard against zero-variance columns
+        # Guard against zero-variance columns
         if x_vals.std() == 0 or y_vals.std() == 0:
             skipped.append((x_field, y_field, 1.0))
             continue
-        r = float(np.corrcoef(x_vals, y_vals, 1.0)[0, 1])
+        r = float(np.corrcoef(x_vals, y_vals)[0, 1])
         if abs(r) >= threshold:
             skipped.append((x_field, y_field, r))
         else:
@@ -179,31 +259,44 @@ def render_scatter(
 def main():
     args = parse_args()
     rows = load_data(args.csv)
-    
+
     if not rows:
         print("No data found in CSV.")
         return
-    
+
     csv_stem = os.path.splitext(os.path.basename(args.csv))[0]
-    csv_stem = csv_stem.removeprefix("features_") # features_shannon -> shannon
-    csv_dir  = os.path.dirname(args.csv)
-    
+
     if args.auto:
-        useful = [f for f in NUMERIC_FEATURES if f not in DEAD]
-        
-        # Upper triangle only (no mirrors, no x_vs_x)
-        pairs = [(useful[i], useful[j])
-                 for i in range(len(useful))
-                 for j in range(i + 1, len(useful))]
-        
-        pairs, skipped = filter_correlated_pairs(pairs, rows, args.corr_threshold)
-        
-        if skipped:
-            print(f"Skipped {len(skipped)} correlated pairs (|r| >= {args.corr_threshold}):")
-            for x_field, y_field, r in skipped:
-                print(f"  {x_field} vs {y_field}  r={r:+.3f}")
-        
-        out_dir = args.output or os.path.join(csv_dir, f"scatter_{csv_stem}")
+        # Candidates: all numeric features except known-dead ones
+        candidates = [f for f in NUMERIC_FEATURES if f not in DEAD]
+
+        # Greedily select top N features that are both high-scoring and
+        # mutually uncorrelated — guarantees pairs will exist after selection
+        top, ranked, rank_method = select_top_features(
+            rows, candidates, args.top_features, args.corr_threshold
+        )
+
+        print(f"\nFeature ranking ({rank_method}):")
+        top_set = set(top)
+        shown = 0
+        for feat, score in ranked:
+            if feat in top_set:
+                shown += 1
+                print(f"  {shown:>2}. {feat:<25}  {score:.4f}")
+        excluded = len(ranked) - len(top)
+        if excluded:
+            print(f"  ... {excluded} features excluded (low score or correlated with a higher-ranked feature)\n")
+
+        if not top:
+            print("No features selected — try raising --corr-threshold or lowering --top-features.")
+            return
+
+        # Upper triangle pairs of selected features
+        pairs = [(top[i], top[j])
+                 for i in range(len(top))
+                 for j in range(i + 1, len(top))]
+
+        out_dir = args.output or os.path.join("results", "scatter", csv_stem)
         os.makedirs(out_dir, exist_ok=True)
         print(f"Generating {len(pairs)} plots -> {out_dir}/")
         for x_field, y_field in pairs:
@@ -213,7 +306,7 @@ def main():
             print(f"\t {x_field} vs {y_field}")
     else:
         img = render_scatter(rows, args.x, args.y)
-        out_dir = args.output or csv_dir
+        out_dir = args.output or os.path.join("results", "scatter", csv_stem)
         os.makedirs(out_dir, exist_ok=True)
         out = os.path.join(out_dir, f"scatter_{csv_stem}.png")
         img.save(out)

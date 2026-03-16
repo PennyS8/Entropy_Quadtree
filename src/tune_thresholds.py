@@ -15,22 +15,22 @@ Strategy:
 
 Usage:
     # Coarse sweep over the full range
-    python3 tune_threshold.py --input real_photos ai_images --labels real ai
+    python3 src/tune_thresholds.py --input real_photos ai_images --labels real ai
 
     # Recommended starting config for compression
-    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
+    python3 src/tune_thresholds.py --input real_photos ai_images --labels real ai \
         --method compression --leaf_size 16
 
     # Custom threshold range
-    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
+    python3 src/tune_thresholds.py --input real_photos ai_images --labels real ai \
         --thresholds 0 5 10 15 20 25 30 35 40 45 50
 
     # Fast pilot run — cap images per class before committing to the full set
-    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
+    python3 src/tune_thresholds.py --input real_photos ai_images --labels real ai \
         --max_images 200
 
     # Refine around a known peak without rerunning the full range
-    python3 tune_threshold.py --input real_photos ai_images --labels real ai \
+    python3 src/tune_thresholds.py --input real_photos ai_images --labels real ai \
         --method compression --thresholds 28 30 32 34 35 36 38 40 --append
 
 Required args:
@@ -44,8 +44,8 @@ Optional args:
     --cv            cross-validation folds (default: 5)
     --workers       parallel image loading workers (default: 4)
     --max_images    cap images per class — useful for fast pilot runs
-    --output        base output CSV path (default: tune_results.csv)
-                    actual file is written as tune_results_{method}.csv
+    --output        base output folder or CSV path (default: results/tuning/)
+                    if a folder is given, file is written as {method}.csv inside it
     --append        merge new threshold values into the existing CSV instead
                     of overwriting. duplicate thresholds are replaced by the
                     new run (last write wins).
@@ -59,6 +59,9 @@ import time
 import numpy as np
 from multiprocessing import Pool, cpu_count
 from PIL import Image
+
+# Allow running from project root as: python3 src/tune_thresholds.py
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from complexity import get_scorer
 from quadtree import QuadTree, QuadNode, BG_THRESHOLD
@@ -219,18 +222,23 @@ def parse_args():
                         default=[0, 10, 20, 30, 40, 50, 60],
                         help="Percentile thresholds to sweep (default: 0 10 20 30 40 50 60)")
     parser.add_argument("--method", choices=["shannon", "compression", "variance"],
-                        default="shannon")
-    parser.add_argument("--leaf_size", type=int, default=4)
+                        default="shannon",
+                        help="Complexity scoring method (default: shannon). "
+                             "Use compression with --leaf_size 16 for best results.")
+    parser.add_argument("--leaf_size", type=int, default=4,
+                        help="Target leaf side length in pixels (default: 4; use 16 for compression)")
     parser.add_argument("--cv", type=int, default=5,
                         help="Cross-validation folds (default: 5)")
     parser.add_argument("--workers", type=int, default=min(4, cpu_count()),
                         help="Parallel workers for image loading (default: 4)")
     parser.add_argument("--max_images", type=int, default=None,
                         help="Max images per class (for fast pilot runs)")
-    parser.add_argument("--output", default="tune_results.csv",
-                        help="Output CSV path (default: tune_results.csv)")
+    parser.add_argument("--output", default="results/tuning",
+                        help="Output folder or CSV path (default: results/tuning). "
+                             "If a folder, file is written as {method}.csv inside it.")
     parser.add_argument("--append", action="store_true",
-                        help="Append to existing features.csv instead of overwriting")
+                        help="Append to existing tuning CSV instead of overwriting. "
+                             "Duplicate thresholds are replaced by the new run.")
     return parser.parse_args()
 
 
@@ -341,35 +349,43 @@ def main():
             "cv_accuracy_std": std_acc,
         })
 
+    # Resolve output path: folder -> results/tuning/{method}.csv
+    output_arg = args.output
+    if output_arg.endswith(".csv"):
+        out_path = output_arg
+    else:
+        out_path = os.path.join(output_arg.rstrip("/"), f"{args.method}.csv")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
     # ── Summary ───────────────────────────────────────────────────────────────
     print(f"\n{'─'*50}")
     print(f"Best threshold: {best_threshold}  (CV accuracy: {best_acc:.4f})")
     print(f"\nRecommendation:")
-    print(f"  python batch.py --input <folder> --output results \\")
+    print(f"  python3 src/batch.py --input <folder> --output results/features/ \\")
     print(f"      --method {args.method} --leaf_size {args.leaf_size} \\")
     print(f"      --threshold {best_threshold}")
 
     # ── Save results ──────────────────────────────────────────────────────────
     fieldnames = list(results[0].keys())
-    if args.append and os.path.exists(args.output):
+    if args.append and os.path.exists(out_path):
         # Load existing rows, index by threshold so new run overwrites duplicates
-        with open(args.output, newline="") as f:
+        with open(out_path, newline="") as f:
             existing = list(csv.DictReader(f))
         merged = {float(r["threshold"]): r for r in existing}
         for r in results:
-            merged[r["threshold"]] = r # new run wins on duplicated
+            merged[r["threshold"]] = r # new run wins on duplicates
         merged_rows = sorted(merged.values(), key=lambda r: float(r["threshold"]))
-        with open(args.output, "w", newline="") as f:
+        with open(out_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(merged_rows)
-        print(f"\nAppended {len(results)} entries -> {args.output} ({len(merged_rows)} total)")
+        print(f"\nAppended {len(results)} entries -> {out_path} ({len(merged_rows)} total)")
     else:
-        with open(args.output, "w", newline="") as f:
+        with open(out_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(results[0].keys()))
             writer.writeheader()
             writer.writerows(results)
-        print(f"\nResults saved: {args.output}")
+        print(f"\nResults saved: {out_path}")
 
 
 if __name__ == "__main__":

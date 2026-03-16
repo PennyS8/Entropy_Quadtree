@@ -1,0 +1,880 @@
+Classification Report (fast mode)
+CSV: results/features/compression.csv
+Features (277): ['mean_complexity', 'std_complexity', 'min_complexity', 'max_complexity', 'complexity_range', 'mean_leaf_area', 'std_leaf_area', 'leaf_count', 'mean_boundary_delta', 'max_boundary_delta', 'mean_depth', 'std_depth', 'mean_merge_delta', 'max_merge_delta', 'std_merge_delta', 'mean_complexity_r', 'mean_complexity_g', 'mean_complexity_b', 'complexity_delta_rg', 'complexity_delta_rb', 'complexity_delta_gb', 'tree_grid_000', 'tree_grid_001', 'tree_grid_002', 'tree_grid_003', 'tree_grid_004', 'tree_grid_005', 'tree_grid_006', 'tree_grid_007', 'tree_grid_008', 'tree_grid_009', 'tree_grid_010', 'tree_grid_011', 'tree_grid_012', 'tree_grid_013', 'tree_grid_014', 'tree_grid_015', 'tree_grid_016', 'tree_grid_017', 'tree_grid_018', 'tree_grid_019', 'tree_grid_020', 'tree_grid_021', 'tree_grid_022', 'tree_grid_023', 'tree_grid_024', 'tree_grid_025', 'tree_grid_026', 'tree_grid_027', 'tree_grid_028', 'tree_grid_029', 'tree_grid_030', 'tree_grid_031', 'tree_grid_032', 'tree_grid_033', 'tree_grid_034', 'tree_grid_035', 'tree_grid_036', 'tree_grid_037', 'tree_grid_038', 'tree_grid_039', 'tree_grid_040', 'tree_grid_041', 'tree_grid_042', 'tree_grid_043', 'tree_grid_044', 'tree_grid_045', 'tree_grid_046', 'tree_grid_047', 'tree_grid_048', 'tree_grid_049', 'tree_grid_050', 'tree_grid_051', 'tree_grid_052', 'tree_grid_053', 'tree_grid_054', 'tree_grid_055', 'tree_grid_056', 'tree_grid_057', 'tree_grid_058', 'tree_grid_059', 'tree_grid_060', 'tree_grid_061', 'tree_grid_062', 'tree_grid_063', 'tree_grid_064', 'tree_grid_065', 'tree_grid_066', 'tree_grid_067', 'tree_grid_068', 'tree_grid_069', 'tree_grid_070', 'tree_grid_071', 'tree_grid_072', 'tree_grid_073', 'tree_grid_074', 'tree_grid_075', 'tree_grid_076', 'tree_grid_077', 'tree_grid_078', 'tree_grid_079', 'tree_grid_080', 'tree_grid_081', 'tree_grid_082', 'tree_grid_083', 'tree_grid_084', 'tree_grid_085', 'tree_grid_086', 'tree_grid_087', 'tree_grid_088', 'tree_grid_089', 'tree_grid_090', 'tree_grid_091', 'tree_grid_092', 'tree_grid_093', 'tree_grid_094', 'tree_grid_095', 'tree_grid_096', 'tree_grid_097', 'tree_grid_098', 'tree_grid_099', 'tree_grid_100', 'tree_grid_101', 'tree_grid_102', 'tree_grid_103', 'tree_grid_104', 'tree_grid_105', 'tree_grid_106', 'tree_grid_107', 'tree_grid_108', 'tree_grid_109', 'tree_grid_110', 'tree_grid_111', 'tree_grid_112', 'tree_grid_113', 'tree_grid_114', 'tree_grid_115', 'tree_grid_116', 'tree_grid_117', 'tree_grid_118', 'tree_grid_119', 'tree_grid_120', 'tree_grid_121', 'tree_grid_122', 'tree_grid_123', 'tree_grid_124', 'tree_grid_125', 'tree_grid_126', 'tree_grid_127', 'tree_grid_128', 'tree_grid_129', 'tree_grid_130', 'tree_grid_131', 'tree_grid_132', 'tree_grid_133', 'tree_grid_134', 'tree_grid_135', 'tree_grid_136', 'tree_grid_137', 'tree_grid_138', 'tree_grid_139', 'tree_grid_140', 'tree_grid_141', 'tree_grid_142', 'tree_grid_143', 'tree_grid_144', 'tree_grid_145', 'tree_grid_146', 'tree_grid_147', 'tree_grid_148', 'tree_grid_149', 'tree_grid_150', 'tree_grid_151', 'tree_grid_152', 'tree_grid_153', 'tree_grid_154', 'tree_grid_155', 'tree_grid_156', 'tree_grid_157', 'tree_grid_158', 'tree_grid_159', 'tree_grid_160', 'tree_grid_161', 'tree_grid_162', 'tree_grid_163', 'tree_grid_164', 'tree_grid_165', 'tree_grid_166', 'tree_grid_167', 'tree_grid_168', 'tree_grid_169', 'tree_grid_170', 'tree_grid_171', 'tree_grid_172', 'tree_grid_173', 'tree_grid_174', 'tree_grid_175', 'tree_grid_176', 'tree_grid_177', 'tree_grid_178', 'tree_grid_179', 'tree_grid_180', 'tree_grid_181', 'tree_grid_182', 'tree_grid_183', 'tree_grid_184', 'tree_grid_185', 'tree_grid_186', 'tree_grid_187', 'tree_grid_188', 'tree_grid_189', 'tree_grid_190', 'tree_grid_191', 'tree_grid_192', 'tree_grid_193', 'tree_grid_194', 'tree_grid_195', 'tree_grid_196', 'tree_grid_197', 'tree_grid_198', 'tree_grid_199', 'tree_grid_200', 'tree_grid_201', 'tree_grid_202', 'tree_grid_203', 'tree_grid_204', 'tree_grid_205', 'tree_grid_206', 'tree_grid_207', 'tree_grid_208', 'tree_grid_209', 'tree_grid_210', 'tree_grid_211', 'tree_grid_212', 'tree_grid_213', 'tree_grid_214', 'tree_grid_215', 'tree_grid_216', 'tree_grid_217', 'tree_grid_218', 'tree_grid_219', 'tree_grid_220', 'tree_grid_221', 'tree_grid_222', 'tree_grid_223', 'tree_grid_224', 'tree_grid_225', 'tree_grid_226', 'tree_grid_227', 'tree_grid_228', 'tree_grid_229', 'tree_grid_230', 'tree_grid_231', 'tree_grid_232', 'tree_grid_233', 'tree_grid_234', 'tree_grid_235', 'tree_grid_236', 'tree_grid_237', 'tree_grid_238', 'tree_grid_239', 'tree_grid_240', 'tree_grid_241', 'tree_grid_242', 'tree_grid_243', 'tree_grid_244', 'tree_grid_245', 'tree_grid_246', 'tree_grid_247', 'tree_grid_248', 'tree_grid_249', 'tree_grid_250', 'tree_grid_251', 'tree_grid_252', 'tree_grid_253', 'tree_grid_254', 'tree_grid_255']
+Train/test split: 80% / 20%
+Balanced: True
+
+Outlier Detection (3*IQR beyond 1st/99th percentile)
+  'Feature'                   'Mean'    'Std'    'Min'    'Max' 'Outliers'
+ ---------------------------------------------------------------------------
+  mean_complexity             0.8258   0.0868   0.3199   0.9914          0
+  std_complexity              0.1919   0.0650   0.0376   0.4216          0
+  min_complexity              0.2153   0.1374   0.0058   0.7037          0
+  max_complexity              1.0000   0.0000   1.0000   1.0000          0
+  complexity_range            0.7847   0.1374   0.2963   0.9942          0
+  mean_leaf_area             65.6873   0.6926  64.4564  69.5728          0
+  std_leaf_area              36.6152   5.4674  28.8089 156.3165          0
+  leaf_count                1361.1590  14.2285 1285.0000 1387.0000          0
+  mean_boundary_delta         0.1001   0.0137   0.0227   0.1670          0
+  max_boundary_delta          0.4403   0.0448   0.2077   0.7167          0
+  mean_depth                  5.3483   0.0022   5.3199   5.3549          0
+  std_depth                   0.4886   0.0063   0.4700   0.5138          0
+  mean_merge_delta            0.1050   0.0449   0.0141   0.4223          0
+  max_merge_delta             0.5662   0.2550   0.1278   1.6751          0
+  std_merge_delta             0.1024   0.0479   0.0258   0.3565          0
+  mean_complexity_r           0.9155   0.0539   0.5101   0.9994          0
+  mean_complexity_g           0.9131   0.0547   0.5017   0.9994          0
+  mean_complexity_b           0.9145   0.0542   0.5142   0.9994          0
+  complexity_delta_rg         0.0053   0.0057   0.0000   0.1307          3
+  complexity_delta_rb         0.0073   0.0082   0.0000   0.1295          0
+  complexity_delta_gb         0.0046   0.0054   0.0000   0.1374          3
+  tree_grid_000               0.4640   0.2702   0.0058   1.0000          0
+  tree_grid_001               0.4750   0.2728   0.0058   1.0000          0
+  tree_grid_002               0.4796   0.2734   0.0058   1.0000          0
+  tree_grid_003               0.5037   0.2744   0.0058   1.0000          0
+  tree_grid_004               0.5068   0.2778   0.0058   1.0000          0
+  tree_grid_005               0.5441   0.2816   0.0058   1.0000          0
+  tree_grid_006               0.5495   0.2761   0.0058   1.0000          0
+  tree_grid_007               0.6077   0.2686   0.0058   1.0000          0
+  tree_grid_008               0.4980   0.2766   0.0058   1.0000          0
+  tree_grid_009               0.5302   0.2755   0.0058   1.0000          0
+  tree_grid_010               0.5095   0.2777   0.0058   1.0000          0
+  tree_grid_011               0.5502   0.2731   0.0058   1.0000          0
+  tree_grid_012               0.5911   0.2712   0.0058   1.0000          0
+  tree_grid_013               0.6624   0.2497   0.0058   1.0000          0
+  tree_grid_014               0.6213   0.2615   0.0058   1.0000          0
+  tree_grid_015               0.6939   0.2296   0.0058   1.0000          0
+  tree_grid_016               0.5979   0.2759   0.0097   1.0000          0
+  tree_grid_017               0.6498   0.2601   0.0097   1.0000          0
+  tree_grid_018               0.6761   0.2436   0.0097   1.0000          0
+  tree_grid_019               0.7197   0.2120   0.0097   1.0000          0
+  tree_grid_020               0.6841   0.2453   0.0128   1.0000          0
+  tree_grid_021               0.6994   0.2333   0.0128   1.0000          0
+  tree_grid_022               0.7347   0.1941   0.0128   1.0000          0
+  tree_grid_023               0.7404   0.1858   0.0128   1.0000          0
+  tree_grid_024               0.7253   0.2126   0.0168   1.0000          0
+  tree_grid_025               0.7572   0.1831   0.0168   1.0000          0
+  tree_grid_026               0.7491   0.1920   0.0168   1.0000          0
+  tree_grid_027               0.7777   0.1673   0.0168   1.0000          0
+  tree_grid_028               0.7740   0.1739   0.0100   1.0000          0
+  tree_grid_029               0.7774   0.1694   0.0100   1.0000          0
+  tree_grid_030               0.7695   0.1605   0.0100   1.0000          0
+  tree_grid_031               0.7555   0.1608   0.0100   1.0000          0
+  tree_grid_032               0.5238   0.2786   0.0097   1.0000          0
+  tree_grid_033               0.5702   0.2711   0.0097   1.0000          0
+  tree_grid_034               0.5348   0.2777   0.0097   1.0000          0
+  tree_grid_035               0.5837   0.2668   0.0097   1.0000          0
+  tree_grid_036               0.6459   0.2526   0.0097   1.0000          0
+  tree_grid_037               0.7149   0.2149   0.0097   1.0000          0
+  tree_grid_038               0.6567   0.2442   0.0097   1.0000          0
+  tree_grid_039               0.7219   0.2056   0.0097   1.0000          0
+  tree_grid_040               0.5503   0.2778   0.0100   1.0000          0
+  tree_grid_041               0.6025   0.2656   0.0100   1.0000          0
+  tree_grid_042               0.5601   0.2821   0.0100   1.0000          0
+  tree_grid_043               0.6196   0.2706   0.0100   1.0000          0
+  tree_grid_044               0.6744   0.2417   0.0171   1.0000          0
+  tree_grid_045               0.7332   0.2025   0.0171   1.0000          0
+  tree_grid_046               0.6942   0.2466   0.0171   1.0000          0
+  tree_grid_047               0.7514   0.2063   0.0171   1.0000          0
+  tree_grid_048               0.7639   0.1784   0.0097   1.0000          0
+  tree_grid_049               0.7530   0.1622   0.0097   1.0000          0
+  tree_grid_050               0.7612   0.1692   0.0097   1.0000          0
+  tree_grid_051               0.7368   0.1579   0.0097   1.0000          0
+  tree_grid_052               0.7364   0.1604   0.0185   1.0000          0
+  tree_grid_053               0.7082   0.1693   0.0185   1.0000          0
+  tree_grid_054               0.7177   0.1537   0.0203   1.0000          0
+  tree_grid_055               0.6772   0.1614   0.0203   1.0000          0
+  tree_grid_056               0.8025   0.1607   0.0185   1.0000          0
+  tree_grid_057               0.8439   0.1357   0.0203   1.0000          0
+  tree_grid_058               0.8205   0.1585   0.0185   1.0000          0
+  tree_grid_059               0.9035   0.1216   0.0203   1.0000          0
+  tree_grid_060               0.8368   0.1450   0.0203   1.0000          0
+  tree_grid_061               0.7644   0.1593   0.0203   1.0000          0
+  tree_grid_062               0.9128   0.1043   0.0203   1.0000          0
+  tree_grid_063               0.8689   0.1086   0.0203   1.0000          0
+  tree_grid_064               0.7015   0.2333   0.0097   1.0000          0
+  tree_grid_065               0.6857   0.2413   0.0097   1.0000          0
+  tree_grid_066               0.7430   0.1864   0.0097   1.0000          0
+  tree_grid_067               0.7366   0.1920   0.0097   1.0000          0
+  tree_grid_068               0.6548   0.2562   0.0100   1.0000          0
+  tree_grid_069               0.6100   0.2716   0.0100   1.0000          0
+  tree_grid_070               0.7233   0.2087   0.0100   1.0000          0
+  tree_grid_071               0.6868   0.2361   0.0100   1.0000          0
+  tree_grid_072               0.7801   0.1701   0.0163   1.0000          0
+  tree_grid_073               0.7743   0.1730   0.0163   1.0000          0
+  tree_grid_074               0.7608   0.1610   0.0163   1.0000          0
+  tree_grid_075               0.7685   0.1595   0.0163   1.0000          0
+  tree_grid_076               0.7601   0.1822   0.0154   1.0000          0
+  tree_grid_077               0.7342   0.2069   0.0154   1.0000          0
+  tree_grid_078               0.7780   0.1664   0.0154   1.0000          0
+  tree_grid_079               0.7564   0.1877   0.0154   1.0000          0
+  tree_grid_080               0.5532   0.2818   0.0074   1.0000          0
+  tree_grid_081               0.5115   0.2787   0.0074   1.0000          0
+  tree_grid_082               0.6195   0.2671   0.0074   1.0000          0
+  tree_grid_083               0.5559   0.2749   0.0074   1.0000          0
+  tree_grid_084               0.4797   0.2731   0.0074   1.0000          0
+  tree_grid_085               0.4623   0.2689   0.0074   1.0000          0
+  tree_grid_086               0.5096   0.2744   0.0074   1.0000          0
+  tree_grid_087               0.4794   0.2699   0.0074   1.0000          0
+  tree_grid_088               0.6776   0.2463   0.0074   1.0000          0
+  tree_grid_089               0.6008   0.2679   0.0074   1.0000          0
+  tree_grid_090               0.7094   0.2267   0.0074   1.0000          0
+  tree_grid_091               0.6333   0.2567   0.0074   1.0000          0
+  tree_grid_092               0.5388   0.2750   0.0074   1.0000          0
+  tree_grid_093               0.4988   0.2728   0.0074   1.0000          0
+  tree_grid_094               0.5622   0.2721   0.0074   1.0000          0
+  tree_grid_095               0.5136   0.2737   0.0074   1.0000          0
+  tree_grid_096               0.7121   0.1687   0.0195   1.0000          0
+  tree_grid_097               0.7357   0.1602   0.0185   1.0000          0
+  tree_grid_098               0.6793   0.1612   0.0185   1.0000          0
+  tree_grid_099               0.7129   0.1534   0.0203   1.0000          0
+  tree_grid_100               0.7570   0.1602   0.0121   1.0000          0
+  tree_grid_101               0.7695   0.1739   0.0121   1.0000          0
+  tree_grid_102               0.7405   0.1567   0.0121   1.0000          0
+  tree_grid_103               0.7707   0.1649   0.0121   1.0000          0
+  tree_grid_104               0.7596   0.1582   0.0185   1.0000          0
+  tree_grid_105               0.8351   0.1430   0.0203   1.0000          0
+  tree_grid_106               0.8663   0.1097   0.0185   1.0000          0
+  tree_grid_107               0.9120   0.1008   0.0203   1.0000          0
+  tree_grid_108               0.8477   0.1364   0.0203   1.0000          0
+  tree_grid_109               0.8155   0.1536   0.0203   1.0000          0
+  tree_grid_110               0.9087   0.1153   0.0203   1.0000          0
+  tree_grid_111               0.8365   0.1498   0.0203   1.0000          0
+  tree_grid_112               0.7276   0.2126   0.0136   1.0000          0
+  tree_grid_113               0.6592   0.2466   0.0136   1.0000          0
+  tree_grid_114               0.7351   0.2039   0.0136   1.0000          0
+  tree_grid_115               0.6699   0.2386   0.0136   1.0000          0
+  tree_grid_116               0.5853   0.2689   0.0100   1.0000          0
+  tree_grid_117               0.5309   0.2749   0.0100   1.0000          0
+  tree_grid_118               0.5989   0.2639   0.0100   1.0000          0
+  tree_grid_119               0.5422   0.2735   0.0100   1.0000          0
+  tree_grid_120               0.7453   0.1998   0.0185   1.0000          0
+  tree_grid_121               0.6873   0.2355   0.0187   1.0000          0
+  tree_grid_122               0.7630   0.2022   0.0185   1.0000          0
+  tree_grid_123               0.7069   0.2398   0.0187   1.0000          0
+  tree_grid_124               0.6172   0.2617   0.0097   1.0000          0
+  tree_grid_125               0.5580   0.2729   0.0097   1.0000          0
+  tree_grid_126               0.6339   0.2664   0.0097   1.0000          0
+  tree_grid_127               0.5685   0.2773   0.0097   1.0000          0
+  tree_grid_128               0.5742   0.2816   0.0097   1.0000          0
+  tree_grid_129               0.6353   0.2708   0.0097   1.0000          0
+  tree_grid_130               0.5767   0.2783   0.0097   1.0000          0
+  tree_grid_131               0.6326   0.2677   0.0097   1.0000          0
+  tree_grid_132               0.7083   0.2473   0.0195   1.0000          0
+  tree_grid_133               0.7587   0.2050   0.0185   1.0000          0
+  tree_grid_134               0.6973   0.2452   0.0185   1.0000          0
+  tree_grid_135               0.7438   0.2048   0.0203   1.0000          0
+  tree_grid_136               0.5710   0.2769   0.0100   1.0000          0
+  tree_grid_137               0.6198   0.2666   0.0100   1.0000          0
+  tree_grid_138               0.5762   0.2721   0.0100   1.0000          0
+  tree_grid_139               0.6151   0.2614   0.0100   1.0000          0
+  tree_grid_140               0.6770   0.2465   0.0100   1.0000          0
+  tree_grid_141               0.7232   0.2111   0.0100   1.0000          0
+  tree_grid_142               0.6604   0.2458   0.0100   1.0000          0
+  tree_grid_143               0.7061   0.2157   0.0100   1.0000          0
+  tree_grid_144               0.7889   0.1614   0.0195   1.0000          0
+  tree_grid_145               0.8482   0.1258   0.0185   1.0000          0
+  tree_grid_146               0.7576   0.1595   0.0185   1.0000          0
+  tree_grid_147               0.7416   0.1354   0.0203   1.0000          0
+  tree_grid_148               0.8707   0.1106   0.0195   1.0000          0
+  tree_grid_149               0.8380   0.1142   0.0185   1.0000          0
+  tree_grid_150               0.8086   0.1249   0.0203   1.0000          0
+  tree_grid_151               0.8231   0.1149   0.0203   1.0000          0
+  tree_grid_152               0.7509   0.1604   0.0185   1.0000          0
+  tree_grid_153               0.7604   0.1348   0.0203   1.0000          0
+  tree_grid_154               0.7445   0.1679   0.0185   1.0000          0
+  tree_grid_155               0.7791   0.1405   0.0203   1.0000          0
+  tree_grid_156               0.8000   0.1259   0.0203   1.0000          0
+  tree_grid_157               0.8828   0.0996   0.0249   1.0000          0
+  tree_grid_158               0.8808   0.1131   0.0203   1.0000          0
+  tree_grid_159               0.9045   0.0954   0.0277   1.0000          0
+  tree_grid_160               0.5871   0.2685   0.0078   1.0000          0
+  tree_grid_161               0.6215   0.2566   0.0078   1.0000          0
+  tree_grid_162               0.5965   0.2648   0.0078   1.0000          0
+  tree_grid_163               0.6303   0.2515   0.0078   1.0000          0
+  tree_grid_164               0.6614   0.2431   0.0078   1.0000          0
+  tree_grid_165               0.7016   0.2206   0.0078   1.0000          0
+  tree_grid_166               0.6671   0.2386   0.0078   1.0000          0
+  tree_grid_167               0.6986   0.2209   0.0078   1.0000          0
+  tree_grid_168               0.6164   0.2575   0.0078   1.0000          0
+  tree_grid_169               0.6461   0.2418   0.0078   1.0000          0
+  tree_grid_170               0.6326   0.2492   0.0078   1.0000          0
+  tree_grid_171               0.6569   0.2342   0.0078   1.0000          0
+  tree_grid_172               0.6783   0.2288   0.0078   1.0000          0
+  tree_grid_173               0.7044   0.2141   0.0078   1.0000          0
+  tree_grid_174               0.6820   0.2226   0.0078   1.0000          0
+  tree_grid_175               0.7021   0.2104   0.0078   1.0000          0
+  tree_grid_176               0.7566   0.1778   0.0195   1.0000          0
+  tree_grid_177               0.7707   0.1456   0.0185   1.0000          0
+  tree_grid_178               0.7420   0.1879   0.0185   1.0000          0
+  tree_grid_179               0.7766   0.1533   0.0203   1.0000          0
+  tree_grid_180               0.8145   0.1252   0.0185   1.0000          0
+  tree_grid_181               0.8930   0.1052   0.0185   1.0000          0
+  tree_grid_182               0.7666   0.1336   0.0203   1.0000          0
+  tree_grid_183               0.7870   0.1185   0.0203   1.0000          0
+  tree_grid_184               0.7303   0.1933   0.0185   1.0000          0
+  tree_grid_185               0.7486   0.1678   0.0203   1.0000          0
+  tree_grid_186               0.7223   0.1950   0.0185   1.0000          0
+  tree_grid_187               0.7221   0.1805   0.0203   1.0000          0
+  tree_grid_188               0.7921   0.1434   0.0203   1.0000          0
+  tree_grid_189               0.8010   0.1281   0.0203   1.0000          0
+  tree_grid_190               0.7217   0.1676   0.0203   1.0000          0
+  tree_grid_191               0.7261   0.1614   0.0203   1.0000          0
+  tree_grid_192               0.8328   0.1153   0.0195   1.0000          0
+  tree_grid_193               0.8711   0.1092   0.0185   1.0000          0
+  tree_grid_194               0.8221   0.1172   0.0185   1.0000          0
+  tree_grid_195               0.8160   0.1213   0.0203   1.0000          0
+  tree_grid_196               0.8544   0.1210   0.0185   1.0000          0
+  tree_grid_197               0.7982   0.1551   0.0185   1.0000          0
+  tree_grid_198               0.7390   0.1327   0.0203   1.0000          0
+  tree_grid_199               0.7638   0.1530   0.0203   1.0000          0
+  tree_grid_200               0.8893   0.0992   0.0185   1.0000          0
+  tree_grid_201               0.8098   0.1216   0.0203   1.0000          0
+  tree_grid_202               0.9079   0.0941   0.0185   1.0000          0
+  tree_grid_203               0.8870   0.1077   0.0203   1.0000          0
+  tree_grid_204               0.7644   0.1332   0.0203   1.0000          0
+  tree_grid_205               0.7587   0.1542   0.0203   1.0000          0
+  tree_grid_206               0.7895   0.1376   0.0203   1.0000          0
+  tree_grid_207               0.7529   0.1614   0.0203   1.0000          0
+  tree_grid_208               0.7692   0.2010   0.0097   1.0000          0
+  tree_grid_209               0.7197   0.2397   0.0097   1.0000          0
+  tree_grid_210               0.7570   0.2009   0.0097   1.0000          0
+  tree_grid_211               0.7078   0.2378   0.0097   1.0000          0
+  tree_grid_212               0.6476   0.2662   0.0100   1.0000          0
+  tree_grid_213               0.5812   0.2763   0.0100   1.0000          0
+  tree_grid_214               0.6430   0.2634   0.0100   1.0000          0
+  tree_grid_215               0.5823   0.2734   0.0100   1.0000          0
+  tree_grid_216               0.7359   0.2071   0.0100   1.0000          0
+  tree_grid_217               0.6860   0.2403   0.0100   1.0000          0
+  tree_grid_218               0.7177   0.2130   0.0100   1.0000          0
+  tree_grid_219               0.6678   0.2412   0.0100   1.0000          0
+  tree_grid_220               0.6299   0.2624   0.0097   1.0000          0
+  tree_grid_221               0.5764   0.2719   0.0097   1.0000          0
+  tree_grid_222               0.6240   0.2586   0.0097   1.0000          0
+  tree_grid_223               0.5794   0.2680   0.0097   1.0000          0
+  tree_grid_224               0.8964   0.1039   0.0195   1.0000          0
+  tree_grid_225               0.8201   0.1235   0.0185   1.0000          0
+  tree_grid_226               0.7911   0.1191   0.0185   1.0000          0
+  tree_grid_227               0.7674   0.1300   0.0203   1.0000          0
+  tree_grid_228               0.7759   0.1402   0.0185   1.0000          0
+  tree_grid_229               0.7646   0.1710   0.0185   1.0000          0
+  tree_grid_230               0.7813   0.1481   0.0203   1.0000          0
+  tree_grid_231               0.7496   0.1820   0.0203   1.0000          0
+  tree_grid_232               0.8028   0.1272   0.0185   1.0000          0
+  tree_grid_233               0.8010   0.1390   0.0203   1.0000          0
+  tree_grid_234               0.7282   0.1611   0.0185   1.0000          0
+  tree_grid_235               0.7238   0.1654   0.0203   1.0000          0
+  tree_grid_236               0.7515   0.1633   0.0097   1.0000          0
+  tree_grid_237               0.7363   0.1876   0.0097   1.0000          0
+  tree_grid_238               0.7239   0.1767   0.0097   1.0000          0
+  tree_grid_239               0.7274   0.1903   0.0097   1.0000          0
+  tree_grid_240               0.7096   0.2188   0.0097   1.0000          0
+  tree_grid_241               0.6667   0.2406   0.0097   1.0000          0
+  tree_grid_242               0.7070   0.2178   0.0097   1.0000          0
+  tree_grid_243               0.6725   0.2352   0.0097   1.0000          0
+  tree_grid_244               0.6299   0.2549   0.0100   1.0000          0
+  tree_grid_245               0.5894   0.2641   0.0100   1.0000          0
+  tree_grid_246               0.6376   0.2489   0.0100   1.0000          0
+  tree_grid_247               0.5992   0.2603   0.0100   1.0000          0
+  tree_grid_248               0.7131   0.2115   0.0100   1.0000          0
+  tree_grid_249               0.6865   0.2249   0.0100   1.0000          0
+  tree_grid_250               0.7100   0.2091   0.0100   1.0000          0
+  tree_grid_251               0.6889   0.2191   0.0100   1.0000          0
+  tree_grid_252               0.6547   0.2388   0.0097   1.0000          0
+  tree_grid_253               0.6176   0.2524   0.0097   1.0000          0
+  tree_grid_254               0.6656   0.2311   0.0097   1.0000          0
+  tree_grid_255               0.6340   0.2436   0.0097   1.0000          0
+Total outlier rows removed: 5 / 161972 (0.00%)
+
+============================================================
+  Logistic Regression
+============================================================
+  Accuracy:  0.8089
+  Precision: 0.8117  (weighted)
+  Recall:    0.8089  (weighted)
+  F1:        0.8084  (weighted)
+  CV (5-fold): 0.8079 ± 0.0021
+
+  Confusion matrix:
+          ai  real  ← predicted
+    ai 13869  2326
+  real  3865 12329
+
+  Coefficients:
+    [ai]
+      mean_complexity           +3.5448
+      std_complexity            +0.1303
+      min_complexity            -0.2704
+      max_complexity            +0.0000
+      complexity_range          +0.2704
+      mean_leaf_area            -0.0601
+      std_leaf_area             -0.0438
+      leaf_count                -0.1580
+      mean_boundary_delta       -0.0202
+      max_boundary_delta        +0.2442
+      mean_depth                +0.0624
+      std_depth                 -0.2023
+      mean_merge_delta          +1.8029
+      max_merge_delta           +0.6701
+      std_merge_delta           -0.7779
+      mean_complexity_r         -1.6146
+      mean_complexity_g         +1.4341
+      mean_complexity_b         -0.4927
+      complexity_delta_rg       +0.1540
+      complexity_delta_rb       +0.0335
+      complexity_delta_gb       -0.0248
+      tree_grid_000             -0.2942
+      tree_grid_001             +0.3071
+      tree_grid_002             +0.1683
+      tree_grid_003             +0.0459
+      tree_grid_004             -0.1291
+      tree_grid_005             -0.1174
+      tree_grid_006             +0.0363
+      tree_grid_007             +0.0159
+      tree_grid_008             -0.1326
+      tree_grid_009             +0.0750
+      tree_grid_010             -0.0142
+      tree_grid_011             +0.0644
+      tree_grid_012             -0.0530
+      tree_grid_013             -0.0151
+      tree_grid_014             -0.0234
+      tree_grid_015             +0.0426
+      tree_grid_016             -0.0340
+      tree_grid_017             +0.0091
+      tree_grid_018             -0.0348
+      tree_grid_019             +0.0174
+      tree_grid_020             -0.1938
+      tree_grid_021             -0.0609
+      tree_grid_022             -0.0261
+      tree_grid_023             +0.1425
+      tree_grid_024             -0.1068
+      tree_grid_025             +0.0603
+      tree_grid_026             +0.0522
+      tree_grid_027             -0.1351
+      tree_grid_028             -0.0977
+      tree_grid_029             -0.0424
+      tree_grid_030             -0.2580
+      tree_grid_031             +0.2201
+      tree_grid_032             +0.0671
+      tree_grid_033             -0.0261
+      tree_grid_034             -0.0776
+      tree_grid_035             +0.0413
+      tree_grid_036             -0.0764
+      tree_grid_037             +0.0561
+      tree_grid_038             +0.1227
+      tree_grid_039             -0.0561
+      tree_grid_040             +0.0258
+      tree_grid_041             +0.0142
+      tree_grid_042             -0.0837
+      tree_grid_043             -0.0660
+      tree_grid_044             -0.0947
+      tree_grid_045             +0.1674
+      tree_grid_046             +0.0007
+      tree_grid_047             -0.0414
+      tree_grid_048             +0.0039
+      tree_grid_049             +0.1247
+      tree_grid_050             +0.0241
+      tree_grid_051             +0.1562
+      tree_grid_052             -0.0830
+      tree_grid_053             +0.1971
+      tree_grid_054             -0.1599
+      tree_grid_055             +0.0156
+      tree_grid_056             -0.2130
+      tree_grid_057             -0.1360
+      tree_grid_058             -0.0755
+      tree_grid_059             +0.0965
+      tree_grid_060             -0.2269
+      tree_grid_061             -0.1403
+      tree_grid_062             +0.2561
+      tree_grid_063             -0.0796
+      tree_grid_064             -0.0416
+      tree_grid_065             -0.1139
+      tree_grid_066             +0.0434
+      tree_grid_067             -0.0421
+      tree_grid_068             +0.1150
+      tree_grid_069             -0.1643
+      tree_grid_070             +0.0021
+      tree_grid_071             -0.0186
+      tree_grid_072             +0.0746
+      tree_grid_073             -0.1530
+      tree_grid_074             -0.0881
+      tree_grid_075             -0.0880
+      tree_grid_076             +0.0070
+      tree_grid_077             -0.0652
+      tree_grid_078             -0.0468
+      tree_grid_079             -0.0522
+      tree_grid_080             +0.0100
+      tree_grid_081             -0.1202
+      tree_grid_082             +0.0923
+      tree_grid_083             +0.0192
+      tree_grid_084             +0.1192
+      tree_grid_085             -0.2080
+      tree_grid_086             +0.0245
+      tree_grid_087             +0.2338
+      tree_grid_088             -0.0622
+      tree_grid_089             -0.0051
+      tree_grid_090             -0.0612
+      tree_grid_091             +0.0418
+      tree_grid_092             +0.0184
+      tree_grid_093             -0.0004
+      tree_grid_094             +0.0401
+      tree_grid_095             +0.0053
+      tree_grid_096             +0.0020
+      tree_grid_097             -0.1623
+      tree_grid_098             -0.2914
+      tree_grid_099             +0.2057
+      tree_grid_100             +0.1019
+      tree_grid_101             +0.0097
+      tree_grid_102             +0.0416
+      tree_grid_103             -0.0973
+      tree_grid_104             -0.0954
+      tree_grid_105             -0.2416
+      tree_grid_106             -0.1049
+      tree_grid_107             -0.0631
+      tree_grid_108             -0.2714
+      tree_grid_109             +0.0314
+      tree_grid_110             +0.2056
+      tree_grid_111             -0.1653
+      tree_grid_112             +0.0929
+      tree_grid_113             -0.1024
+      tree_grid_114             -0.0081
+      tree_grid_115             +0.1367
+      tree_grid_116             -0.0700
+      tree_grid_117             -0.0711
+      tree_grid_118             -0.0130
+      tree_grid_119             -0.0259
+      tree_grid_120             +0.0435
+      tree_grid_121             -0.0813
+      tree_grid_122             +0.0942
+      tree_grid_123             -0.0017
+      tree_grid_124             -0.0389
+      tree_grid_125             +0.0133
+      tree_grid_126             -0.0246
+      tree_grid_127             -0.1128
+      tree_grid_128             +0.0629
+      tree_grid_129             +0.0511
+      tree_grid_130             -0.0471
+      tree_grid_131             -0.0834
+      tree_grid_132             -0.0481
+      tree_grid_133             -0.1448
+      tree_grid_134             -0.0058
+      tree_grid_135             +0.0678
+      tree_grid_136             +0.0291
+      tree_grid_137             +0.0364
+      tree_grid_138             -0.0110
+      tree_grid_139             -0.0218
+      tree_grid_140             -0.0499
+      tree_grid_141             +0.1013
+      tree_grid_142             +0.0263
+      tree_grid_143             +0.0002
+      tree_grid_144             +0.1501
+      tree_grid_145             +0.0186
+      tree_grid_146             +0.2106
+      tree_grid_147             +0.0989
+      tree_grid_148             -0.0782
+      tree_grid_149             +0.2767
+      tree_grid_150             -0.4223
+      tree_grid_151             +0.0944
+      tree_grid_152             -0.2456
+      tree_grid_153             +0.0701
+      tree_grid_154             -0.0252
+      tree_grid_155             -0.2423
+      tree_grid_156             +0.0399
+      tree_grid_157             -0.0804
+      tree_grid_158             -0.0891
+      tree_grid_159             +0.1722
+      tree_grid_160             +0.0355
+      tree_grid_161             +0.0509
+      tree_grid_162             -0.0302
+      tree_grid_163             -0.0783
+      tree_grid_164             +0.0396
+      tree_grid_165             -0.0226
+      tree_grid_166             -0.0961
+      tree_grid_167             -0.0596
+      tree_grid_168             -0.0136
+      tree_grid_169             +0.1283
+      tree_grid_170             -0.0964
+      tree_grid_171             -0.0109
+      tree_grid_172             +0.0392
+      tree_grid_173             -0.0202
+      tree_grid_174             -0.0140
+      tree_grid_175             -0.0552
+      tree_grid_176             +0.0025
+      tree_grid_177             +0.2294
+      tree_grid_178             -0.0572
+      tree_grid_179             -0.0606
+      tree_grid_180             +0.0401
+      tree_grid_181             +0.1204
+      tree_grid_182             +0.0363
+      tree_grid_183             +0.0115
+      tree_grid_184             -0.0152
+      tree_grid_185             +0.0047
+      tree_grid_186             -0.0457
+      tree_grid_187             +0.0055
+      tree_grid_188             -0.0954
+      tree_grid_189             +0.0215
+      tree_grid_190             +0.0250
+      tree_grid_191             +0.0822
+      tree_grid_192             +0.2303
+      tree_grid_193             +0.2990
+      tree_grid_194             +0.0927
+      tree_grid_195             -0.2134
+      tree_grid_196             -0.0641
+      tree_grid_197             +0.1665
+      tree_grid_198             +0.1392
+      tree_grid_199             +0.1258
+      tree_grid_200             -0.0704
+      tree_grid_201             +0.0195
+      tree_grid_202             +0.2183
+      tree_grid_203             -0.1553
+      tree_grid_204             -0.1416
+      tree_grid_205             -0.1165
+      tree_grid_206             +0.1091
+      tree_grid_207             -0.0892
+      tree_grid_208             -0.0102
+      tree_grid_209             -0.0392
+      tree_grid_210             -0.1471
+      tree_grid_211             +0.0490
+      tree_grid_212             +0.0444
+      tree_grid_213             +0.1559
+      tree_grid_214             -0.0478
+      tree_grid_215             -0.0502
+      tree_grid_216             +0.0428
+      tree_grid_217             -0.0819
+      tree_grid_218             +0.0001
+      tree_grid_219             -0.0085
+      tree_grid_220             -0.0010
+      tree_grid_221             +0.0373
+      tree_grid_222             -0.0094
+      tree_grid_223             +0.0034
+      tree_grid_224             +0.0059
+      tree_grid_225             +0.2095
+      tree_grid_226             -0.0743
+      tree_grid_227             -0.0296
+      tree_grid_228             -0.0574
+      tree_grid_229             +0.0041
+      tree_grid_230             -0.0266
+      tree_grid_231             -0.0598
+      tree_grid_232             +0.0438
+      tree_grid_233             -0.1702
+      tree_grid_234             +0.0759
+      tree_grid_235             +0.0429
+      tree_grid_236             +0.1189
+      tree_grid_237             +0.0374
+      tree_grid_238             -0.0791
+      tree_grid_239             -0.0686
+      tree_grid_240             +0.0774
+      tree_grid_241             +0.0461
+      tree_grid_242             -0.0513
+      tree_grid_243             -0.1013
+      tree_grid_244             +0.0081
+      tree_grid_245             +0.0719
+      tree_grid_246             -0.0107
+      tree_grid_247             -0.1086
+      tree_grid_248             -0.0385
+      tree_grid_249             -0.0043
+      tree_grid_250             -0.0130
+      tree_grid_251             -0.0642
+      tree_grid_252             +0.0720
+      tree_grid_253             +0.0521
+      tree_grid_254             -0.0912
+      tree_grid_255             -0.0973
+
+============================================================
+  Random Forest
+============================================================
+  Accuracy:  0.9274
+  Precision: 0.9291  (weighted)
+  Recall:    0.9274  (weighted)
+  F1:        0.9273  (weighted)
+  CV (5-fold): 0.9157 ± 0.0014
+
+  Confusion matrix:
+          ai  real  ← predicted
+    ai 15532   663
+  real  1688 14506
+
+  Feature importances:
+    min_complexity            0.0319  █
+    complexity_range          0.0242  
+    max_merge_delta           0.0231  
+    tree_grid_060             0.0198  
+    tree_grid_105             0.0194  
+    tree_grid_085             0.0171  
+    tree_grid_148             0.0165  
+    tree_grid_000             0.0156  
+    tree_grid_193             0.0151  
+    std_merge_delta           0.0145  
+    tree_grid_061             0.0132  
+    max_boundary_delta        0.0131  
+    tree_grid_104             0.0110  
+    tree_grid_108             0.0110  
+    tree_grid_002             0.0098  
+    tree_grid_145             0.0090  
+    mean_depth                0.0089  
+    tree_grid_196             0.0087  
+    tree_grid_057             0.0083  
+    tree_grid_001             0.0079  
+    tree_grid_150             0.0079  
+    tree_grid_158             0.0065  
+    tree_grid_087             0.0065  
+    tree_grid_149             0.0060  
+    tree_grid_224             0.0060  
+    tree_grid_192             0.0058  
+    tree_grid_181             0.0057  
+    mean_merge_delta          0.0057  
+    tree_grid_195             0.0055  
+    tree_grid_095             0.0055  
+    complexity_delta_rg       0.0054  
+    tree_grid_084             0.0053  
+    tree_grid_225             0.0052  
+    tree_grid_032             0.0050  
+    tree_grid_093             0.0048  
+    tree_grid_005             0.0048  
+    tree_grid_081             0.0048  
+    tree_grid_202             0.0046  
+    tree_grid_159             0.0046  
+    tree_grid_203             0.0045  
+    complexity_delta_rb       0.0045  
+    tree_grid_180             0.0044  
+    tree_grid_056             0.0044  
+    tree_grid_008             0.0043  
+    std_leaf_area             0.0042  
+    tree_grid_157             0.0040  
+    tree_grid_080             0.0039  
+    tree_grid_010             0.0038  
+    tree_grid_200             0.0038  
+    tree_grid_051             0.0037  
+    tree_grid_109             0.0037  
+    tree_grid_003             0.0037  
+    tree_grid_059             0.0037  
+    tree_grid_020             0.0036  
+    tree_grid_092             0.0036  
+    leaf_count                0.0036  
+    tree_grid_226             0.0035  
+    tree_grid_191             0.0035  
+    mean_complexity_r         0.0035  
+    tree_grid_151             0.0035  
+    tree_grid_183             0.0035  
+    tree_grid_086             0.0035  
+    tree_grid_117             0.0034  
+    tree_grid_119             0.0034  
+    tree_grid_147             0.0034  
+    tree_grid_198             0.0034  
+    tree_grid_107             0.0033  
+    tree_grid_040             0.0033  
+    tree_grid_063             0.0033  
+    tree_grid_194             0.0033  
+    tree_grid_058             0.0032  
+    tree_grid_034             0.0032  
+    tree_grid_177             0.0032  
+    complexity_delta_gb       0.0032  
+    tree_grid_004             0.0032  
+    tree_grid_021             0.0032  
+    tree_grid_106             0.0032  
+    tree_grid_055             0.0032  
+    tree_grid_197             0.0032  
+    std_depth                 0.0032  
+    tree_grid_098             0.0032  
+    tree_grid_062             0.0031  
+    tree_grid_182             0.0031  
+    tree_grid_234             0.0031  
+    tree_grid_009             0.0031  
+    tree_grid_144             0.0031  
+    mean_leaf_area            0.0031  
+    mean_complexity_b         0.0031  
+    tree_grid_111             0.0031  
+    tree_grid_127             0.0030  
+    std_complexity            0.0030  
+    tree_grid_215             0.0030  
+    mean_complexity           0.0030  
+    tree_grid_099             0.0030  
+    tree_grid_201             0.0030  
+    tree_grid_156             0.0030  
+    tree_grid_213             0.0030  
+    tree_grid_053             0.0029  
+    tree_grid_054             0.0029  
+    tree_grid_232             0.0028  
+    tree_grid_227             0.0028  
+    tree_grid_064             0.0028  
+    tree_grid_052             0.0028  
+    tree_grid_189             0.0028  
+    tree_grid_146             0.0028  
+    mean_boundary_delta       0.0028  
+    tree_grid_110             0.0028  
+    tree_grid_125             0.0028  
+    tree_grid_128             0.0027  
+    tree_grid_190             0.0027  
+    tree_grid_033             0.0027  
+    tree_grid_030             0.0027  
+    tree_grid_065             0.0027  
+    tree_grid_204             0.0026  
+    tree_grid_006             0.0026  
+    tree_grid_035             0.0026  
+    tree_grid_138             0.0026  
+    tree_grid_027             0.0026  
+    tree_grid_041             0.0026  
+    tree_grid_206             0.0026  
+    tree_grid_042             0.0026  
+    tree_grid_102             0.0026  
+    tree_grid_016             0.0026  
+    mean_complexity_g         0.0026  
+    tree_grid_155             0.0026  
+    tree_grid_044             0.0025  
+    tree_grid_199             0.0025  
+    tree_grid_153             0.0025  
+    tree_grid_136             0.0025  
+    tree_grid_233             0.0025  
+    tree_grid_137             0.0025  
+    tree_grid_214             0.0025  
+    tree_grid_097             0.0025  
+    tree_grid_103             0.0025  
+    tree_grid_245             0.0025  
+    tree_grid_069             0.0025  
+    tree_grid_139             0.0025  
+    tree_grid_028             0.0025  
+    tree_grid_073             0.0025  
+    tree_grid_228             0.0024  
+    tree_grid_078             0.0024  
+    tree_grid_129             0.0024  
+    tree_grid_101             0.0024  
+    tree_grid_043             0.0024  
+    tree_grid_223             0.0024  
+    tree_grid_207             0.0024  
+    tree_grid_188             0.0024  
+    tree_grid_029             0.0024  
+    tree_grid_205             0.0024  
+    tree_grid_074             0.0024  
+    tree_grid_070             0.0024  
+    tree_grid_230             0.0024  
+    tree_grid_221             0.0024  
+    tree_grid_152             0.0024  
+    tree_grid_075             0.0023  
+    tree_grid_124             0.0023  
+    tree_grid_235             0.0023  
+    tree_grid_096             0.0023  
+    tree_grid_011             0.0023  
+    tree_grid_179             0.0023  
+    tree_grid_031             0.0023  
+    tree_grid_118             0.0023  
+    tree_grid_100             0.0023  
+    tree_grid_160             0.0023  
+    tree_grid_212             0.0023  
+    tree_grid_094             0.0023  
+    tree_grid_154             0.0023  
+    tree_grid_017             0.0023  
+    tree_grid_038             0.0023  
+    tree_grid_039             0.0023  
+    tree_grid_126             0.0023  
+    tree_grid_130             0.0023  
+    tree_grid_116             0.0023  
+    tree_grid_162             0.0023  
+    tree_grid_050             0.0022  
+    tree_grid_068             0.0022  
+    tree_grid_067             0.0022  
+    tree_grid_083             0.0022  
+    tree_grid_045             0.0022  
+    tree_grid_185             0.0022  
+    tree_grid_049             0.0022  
+    tree_grid_072             0.0022  
+    tree_grid_047             0.0022  
+    tree_grid_077             0.0022  
+    tree_grid_019             0.0022  
+    tree_grid_222             0.0022  
+    tree_grid_079             0.0022  
+    tree_grid_209             0.0022  
+    tree_grid_120             0.0022  
+    tree_grid_122             0.0022  
+    tree_grid_046             0.0022  
+    tree_grid_076             0.0022  
+    tree_grid_133             0.0021  
+    tree_grid_123             0.0021  
+    tree_grid_131             0.0021  
+    tree_grid_161             0.0021  
+    tree_grid_114             0.0021  
+    tree_grid_048             0.0021  
+    tree_grid_066             0.0021  
+    tree_grid_236             0.0021  
+    tree_grid_170             0.0021  
+    tree_grid_112             0.0021  
+    tree_grid_142             0.0021  
+    tree_grid_121             0.0021  
+    tree_grid_186             0.0021  
+    tree_grid_135             0.0021  
+    tree_grid_229             0.0021  
+    tree_grid_025             0.0021  
+    tree_grid_238             0.0021  
+    tree_grid_132             0.0021  
+    tree_grid_022             0.0021  
+    tree_grid_220             0.0021  
+    tree_grid_251             0.0020  
+    tree_grid_115             0.0020  
+    tree_grid_208             0.0020  
+    tree_grid_026             0.0020  
+    tree_grid_184             0.0020  
+    tree_grid_036             0.0020  
+    tree_grid_244             0.0020  
+    tree_grid_113             0.0020  
+    tree_grid_014             0.0020  
+    tree_grid_219             0.0020  
+    tree_grid_210             0.0020  
+    tree_grid_255             0.0020  
+    tree_grid_254             0.0020  
+    tree_grid_037             0.0020  
+    tree_grid_250             0.0020  
+    tree_grid_175             0.0020  
+    tree_grid_176             0.0020  
+    tree_grid_023             0.0020  
+    tree_grid_241             0.0020  
+    tree_grid_089             0.0020  
+    tree_grid_024             0.0020  
+    tree_grid_168             0.0020  
+    tree_grid_018             0.0020  
+    tree_grid_187             0.0020  
+    tree_grid_174             0.0020  
+    tree_grid_134             0.0020  
+    tree_grid_071             0.0020  
+    tree_grid_239             0.0019  
+    tree_grid_237             0.0019  
+    tree_grid_140             0.0019  
+    tree_grid_246             0.0019  
+    tree_grid_178             0.0019  
+    tree_grid_247             0.0019  
+    tree_grid_090             0.0019  
+    tree_grid_169             0.0019  
+    tree_grid_211             0.0019  
+    tree_grid_231             0.0019  
+    tree_grid_167             0.0019  
+    tree_grid_015             0.0019  
+    tree_grid_240             0.0019  
+    tree_grid_216             0.0019  
+    tree_grid_173             0.0019  
+    tree_grid_143             0.0019  
+    tree_grid_082             0.0019  
+    tree_grid_163             0.0019  
+    tree_grid_165             0.0019  
+    tree_grid_249             0.0019  
+    tree_grid_218             0.0019  
+    tree_grid_248             0.0019  
+    tree_grid_091             0.0019  
+    tree_grid_012             0.0019  
+    tree_grid_253             0.0018  
+    tree_grid_252             0.0018  
+    tree_grid_141             0.0018  
+    tree_grid_088             0.0018  
+    tree_grid_242             0.0018  
+    tree_grid_013             0.0018  
+    tree_grid_172             0.0018  
+    tree_grid_171             0.0018  
+    tree_grid_164             0.0018  
+    tree_grid_217             0.0017  
+    tree_grid_166             0.0017  
+    tree_grid_007             0.0017  
+    tree_grid_243             0.0017  
+    max_complexity            0.0000  
+
+============================================================
+  SUMMARY (by accuracy)
+============================================================
+  Random Forest             0.9274  █████████████████████████████████████
+  Logistic Regression       0.8089  ████████████████████████████████
