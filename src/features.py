@@ -3,8 +3,8 @@ features.py
 
 Extracts a feature vector from a built quadtree for downstream analysis.
 
-Features are designed to distinguish real photographs, AI-generated images,
-and photoshopped images based on complexity distribution properties.
+Features are designed to distinguish authentic photographs, synthetic AI-generated
+images, and manipulated (face-swapped/composited) images based on complexity distribution properties.
 
 Output can be saved as CSV for use in scatter plots or classifiers.
 """
@@ -12,7 +12,7 @@ Output can be saved as CSV for use in scatter plots or classifiers.
 import os
 import csv
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field, make_dataclass
 from typing import Optional
 from quadtree import QuadNode, BG_THRESHOLD
 
@@ -36,322 +36,81 @@ TREE_GRID_NAMES = ["tree_grid_{:03d}".format(i) for i in range(TREE_GRID_SIZE)]
 
 # Feature vector
 
-@dataclass
-class imageFeatures:
-    filename: str
-    
-    # Global complexity distribution (subject nodes only)
-    mean_complexity: float      # average complexity across subject leaves
-    std_complexity: float       # variance of complexity — low in AI images
-    min_complexity: float       # floor of complexity
-    max_complexity: float       # ceiling of complexity
-    complexity_range: float     # max - min — spread of the distribution
-    
-    # Spacial structure
-    mean_leaf_area: float       # average subject leaf area in pixels
-    std_leaf_area: float        # variance in leaf area, high = adaptive splits
-    leaf_count: int             # total subjet leaf count
-    
-    # Boundary signal, complexity delta between parent and children
-    mean_boundary_delta: float  # average |parent - child| complexity at splits
-    max_boundary_delta: float   # maximum boundary jump, manipulation signal
-    
-    # Depth distribution
-    mean_depth: float           # how deep the tree goes on average
-    std_depth: float            # variance in depth
-    
-    # Merge-step delta, information gain at each split
-    mean_merge_delta: float     # average std(children) / (parent + eps) across all splits
-    max_merge_delta: float      # peak merge delta — highlights manipulation boundaries
-    std_merge_delta: float      # variance of merge deltas — high in real, low in AI
-    
-    # Per-channel (optional, requires image passed to extract_features)
-    # Raw means track per-channel complexity; deltas capture inter-channel divergence.
-    mean_complexity_r: float = 0.0 # mean complexity of red channel across subject leaves
-    mean_complexity_g: float = 0.0 # mean complexity of green channel across subject leaves
-    mean_complexity_b: float = 0.0 # mean complexity of blue channel across subject leaves
-    complexity_delta_rg: float = 0.0 # |mean_r - mean_g|, inter-channel divergence
-    complexity_delta_rb: float = 0.0 # |mean_r - mean_b|
-    complexity_delta_gb: float = 0.0 # |mean_g - mean_b|
-    
-    # Tree-grid spatial map — complexity at each cell of a 4^4=256 node grid.
-    # Cells are named tree_grid_000 through tree_grid_255 in Morton order.
-    # Filled by propagating parent complexity for nodes that stopped early.
-    tree_grid_000: float = 0.0
-    tree_grid_001: float = 0.0
-    tree_grid_002: float = 0.0
-    tree_grid_003: float = 0.0
-    tree_grid_004: float = 0.0
-    tree_grid_005: float = 0.0
-    tree_grid_006: float = 0.0
-    tree_grid_007: float = 0.0
-    tree_grid_008: float = 0.0
-    tree_grid_009: float = 0.0
-    tree_grid_010: float = 0.0
-    tree_grid_011: float = 0.0
-    tree_grid_012: float = 0.0
-    tree_grid_013: float = 0.0
-    tree_grid_014: float = 0.0
-    tree_grid_015: float = 0.0
-    tree_grid_016: float = 0.0
-    tree_grid_017: float = 0.0
-    tree_grid_018: float = 0.0
-    tree_grid_019: float = 0.0
-    tree_grid_020: float = 0.0
-    tree_grid_021: float = 0.0
-    tree_grid_022: float = 0.0
-    tree_grid_023: float = 0.0
-    tree_grid_024: float = 0.0
-    tree_grid_025: float = 0.0
-    tree_grid_026: float = 0.0
-    tree_grid_027: float = 0.0
-    tree_grid_028: float = 0.0
-    tree_grid_029: float = 0.0
-    tree_grid_030: float = 0.0
-    tree_grid_031: float = 0.0
-    tree_grid_032: float = 0.0
-    tree_grid_033: float = 0.0
-    tree_grid_034: float = 0.0
-    tree_grid_035: float = 0.0
-    tree_grid_036: float = 0.0
-    tree_grid_037: float = 0.0
-    tree_grid_038: float = 0.0
-    tree_grid_039: float = 0.0
-    tree_grid_040: float = 0.0
-    tree_grid_041: float = 0.0
-    tree_grid_042: float = 0.0
-    tree_grid_043: float = 0.0
-    tree_grid_044: float = 0.0
-    tree_grid_045: float = 0.0
-    tree_grid_046: float = 0.0
-    tree_grid_047: float = 0.0
-    tree_grid_048: float = 0.0
-    tree_grid_049: float = 0.0
-    tree_grid_050: float = 0.0
-    tree_grid_051: float = 0.0
-    tree_grid_052: float = 0.0
-    tree_grid_053: float = 0.0
-    tree_grid_054: float = 0.0
-    tree_grid_055: float = 0.0
-    tree_grid_056: float = 0.0
-    tree_grid_057: float = 0.0
-    tree_grid_058: float = 0.0
-    tree_grid_059: float = 0.0
-    tree_grid_060: float = 0.0
-    tree_grid_061: float = 0.0
-    tree_grid_062: float = 0.0
-    tree_grid_063: float = 0.0
-    tree_grid_064: float = 0.0
-    tree_grid_065: float = 0.0
-    tree_grid_066: float = 0.0
-    tree_grid_067: float = 0.0
-    tree_grid_068: float = 0.0
-    tree_grid_069: float = 0.0
-    tree_grid_070: float = 0.0
-    tree_grid_071: float = 0.0
-    tree_grid_072: float = 0.0
-    tree_grid_073: float = 0.0
-    tree_grid_074: float = 0.0
-    tree_grid_075: float = 0.0
-    tree_grid_076: float = 0.0
-    tree_grid_077: float = 0.0
-    tree_grid_078: float = 0.0
-    tree_grid_079: float = 0.0
-    tree_grid_080: float = 0.0
-    tree_grid_081: float = 0.0
-    tree_grid_082: float = 0.0
-    tree_grid_083: float = 0.0
-    tree_grid_084: float = 0.0
-    tree_grid_085: float = 0.0
-    tree_grid_086: float = 0.0
-    tree_grid_087: float = 0.0
-    tree_grid_088: float = 0.0
-    tree_grid_089: float = 0.0
-    tree_grid_090: float = 0.0
-    tree_grid_091: float = 0.0
-    tree_grid_092: float = 0.0
-    tree_grid_093: float = 0.0
-    tree_grid_094: float = 0.0
-    tree_grid_095: float = 0.0
-    tree_grid_096: float = 0.0
-    tree_grid_097: float = 0.0
-    tree_grid_098: float = 0.0
-    tree_grid_099: float = 0.0
-    tree_grid_100: float = 0.0
-    tree_grid_101: float = 0.0
-    tree_grid_102: float = 0.0
-    tree_grid_103: float = 0.0
-    tree_grid_104: float = 0.0
-    tree_grid_105: float = 0.0
-    tree_grid_106: float = 0.0
-    tree_grid_107: float = 0.0
-    tree_grid_108: float = 0.0
-    tree_grid_109: float = 0.0
-    tree_grid_110: float = 0.0
-    tree_grid_111: float = 0.0
-    tree_grid_112: float = 0.0
-    tree_grid_113: float = 0.0
-    tree_grid_114: float = 0.0
-    tree_grid_115: float = 0.0
-    tree_grid_116: float = 0.0
-    tree_grid_117: float = 0.0
-    tree_grid_118: float = 0.0
-    tree_grid_119: float = 0.0
-    tree_grid_120: float = 0.0
-    tree_grid_121: float = 0.0
-    tree_grid_122: float = 0.0
-    tree_grid_123: float = 0.0
-    tree_grid_124: float = 0.0
-    tree_grid_125: float = 0.0
-    tree_grid_126: float = 0.0
-    tree_grid_127: float = 0.0
-    tree_grid_128: float = 0.0
-    tree_grid_129: float = 0.0
-    tree_grid_130: float = 0.0
-    tree_grid_131: float = 0.0
-    tree_grid_132: float = 0.0
-    tree_grid_133: float = 0.0
-    tree_grid_134: float = 0.0
-    tree_grid_135: float = 0.0
-    tree_grid_136: float = 0.0
-    tree_grid_137: float = 0.0
-    tree_grid_138: float = 0.0
-    tree_grid_139: float = 0.0
-    tree_grid_140: float = 0.0
-    tree_grid_141: float = 0.0
-    tree_grid_142: float = 0.0
-    tree_grid_143: float = 0.0
-    tree_grid_144: float = 0.0
-    tree_grid_145: float = 0.0
-    tree_grid_146: float = 0.0
-    tree_grid_147: float = 0.0
-    tree_grid_148: float = 0.0
-    tree_grid_149: float = 0.0
-    tree_grid_150: float = 0.0
-    tree_grid_151: float = 0.0
-    tree_grid_152: float = 0.0
-    tree_grid_153: float = 0.0
-    tree_grid_154: float = 0.0
-    tree_grid_155: float = 0.0
-    tree_grid_156: float = 0.0
-    tree_grid_157: float = 0.0
-    tree_grid_158: float = 0.0
-    tree_grid_159: float = 0.0
-    tree_grid_160: float = 0.0
-    tree_grid_161: float = 0.0
-    tree_grid_162: float = 0.0
-    tree_grid_163: float = 0.0
-    tree_grid_164: float = 0.0
-    tree_grid_165: float = 0.0
-    tree_grid_166: float = 0.0
-    tree_grid_167: float = 0.0
-    tree_grid_168: float = 0.0
-    tree_grid_169: float = 0.0
-    tree_grid_170: float = 0.0
-    tree_grid_171: float = 0.0
-    tree_grid_172: float = 0.0
-    tree_grid_173: float = 0.0
-    tree_grid_174: float = 0.0
-    tree_grid_175: float = 0.0
-    tree_grid_176: float = 0.0
-    tree_grid_177: float = 0.0
-    tree_grid_178: float = 0.0
-    tree_grid_179: float = 0.0
-    tree_grid_180: float = 0.0
-    tree_grid_181: float = 0.0
-    tree_grid_182: float = 0.0
-    tree_grid_183: float = 0.0
-    tree_grid_184: float = 0.0
-    tree_grid_185: float = 0.0
-    tree_grid_186: float = 0.0
-    tree_grid_187: float = 0.0
-    tree_grid_188: float = 0.0
-    tree_grid_189: float = 0.0
-    tree_grid_190: float = 0.0
-    tree_grid_191: float = 0.0
-    tree_grid_192: float = 0.0
-    tree_grid_193: float = 0.0
-    tree_grid_194: float = 0.0
-    tree_grid_195: float = 0.0
-    tree_grid_196: float = 0.0
-    tree_grid_197: float = 0.0
-    tree_grid_198: float = 0.0
-    tree_grid_199: float = 0.0
-    tree_grid_200: float = 0.0
-    tree_grid_201: float = 0.0
-    tree_grid_202: float = 0.0
-    tree_grid_203: float = 0.0
-    tree_grid_204: float = 0.0
-    tree_grid_205: float = 0.0
-    tree_grid_206: float = 0.0
-    tree_grid_207: float = 0.0
-    tree_grid_208: float = 0.0
-    tree_grid_209: float = 0.0
-    tree_grid_210: float = 0.0
-    tree_grid_211: float = 0.0
-    tree_grid_212: float = 0.0
-    tree_grid_213: float = 0.0
-    tree_grid_214: float = 0.0
-    tree_grid_215: float = 0.0
-    tree_grid_216: float = 0.0
-    tree_grid_217: float = 0.0
-    tree_grid_218: float = 0.0
-    tree_grid_219: float = 0.0
-    tree_grid_220: float = 0.0
-    tree_grid_221: float = 0.0
-    tree_grid_222: float = 0.0
-    tree_grid_223: float = 0.0
-    tree_grid_224: float = 0.0
-    tree_grid_225: float = 0.0
-    tree_grid_226: float = 0.0
-    tree_grid_227: float = 0.0
-    tree_grid_228: float = 0.0
-    tree_grid_229: float = 0.0
-    tree_grid_230: float = 0.0
-    tree_grid_231: float = 0.0
-    tree_grid_232: float = 0.0
-    tree_grid_233: float = 0.0
-    tree_grid_234: float = 0.0
-    tree_grid_235: float = 0.0
-    tree_grid_236: float = 0.0
-    tree_grid_237: float = 0.0
-    tree_grid_238: float = 0.0
-    tree_grid_239: float = 0.0
-    tree_grid_240: float = 0.0
-    tree_grid_241: float = 0.0
-    tree_grid_242: float = 0.0
-    tree_grid_243: float = 0.0
-    tree_grid_244: float = 0.0
-    tree_grid_245: float = 0.0
-    tree_grid_246: float = 0.0
-    tree_grid_247: float = 0.0
-    tree_grid_248: float = 0.0
-    tree_grid_249: float = 0.0
-    tree_grid_250: float = 0.0
-    tree_grid_251: float = 0.0
-    tree_grid_252: float = 0.0
-    tree_grid_253: float = 0.0
-    tree_grid_254: float = 0.0
-    tree_grid_255: float = 0.0
-    
-    label: Optional[str] = None # "real", "ai", "photoshopped" (set manually)
-    
-    def to_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if v is not None or k == "label"}
+# imageFeatures is generated dynamically so the 256 tree_grid_* fields don't
+# need to be written out by hand. make_dataclass produces an identical class to
+# what a hand-written @dataclass would give — same constructor, same attributes,
+# same repr, same to_dict — the only difference is the class body is 5 lines
+# instead of 300.
+#
+# Field layout (dataclass rules: required fields must precede fields with defaults):
+#   1. Required (no default): filename + 15 scalar metrics
+#   2. Optional float=0.0:    per-channel features, then 256 tree_grid cells
+#   3. Optional metadata:     label, label_detail, is_real, dataset_source
+
+def _to_dict(self) -> dict:
+    always = {"label", "label_detail", "is_real", "dataset_source"}
+    return {k: v for k, v in self.__dict__.items() if v is not None or k in always}
+
+imageFeatures = make_dataclass(
+    "imageFeatures",
+    fields=[
+        # --- required (no default) ---
+        # filename
+        ("filename",             str),
+        # Global complexity distribution (subject nodes only)
+        ("mean_complexity",      float),   # average complexity across subject leaves
+        ("std_complexity",       float),   # variance of complexity — low in AI images
+        ("min_complexity",       float),   # floor of complexity
+        ("max_complexity",       float),   # ceiling of complexity
+        ("complexity_range",     float),   # max - min — spread of the distribution
+        # Spatial structure
+        ("mean_leaf_area",       float),   # average subject leaf area in pixels
+        ("std_leaf_area",        float),   # variance in leaf area, high = adaptive splits
+        ("leaf_count",           int),     # total subject leaf count
+        # Boundary signal
+        ("mean_boundary_delta",  float),   # average |parent - child| complexity at splits
+        ("max_boundary_delta",   float),   # maximum boundary jump, manipulation signal
+        # Depth distribution
+        ("mean_depth",           float),   # how deep the tree goes on average
+        ("std_depth",            float),   # variance in depth
+        # Merge-step delta — information gain at each split
+        ("mean_merge_delta",     float),   # average std(children)/(parent+eps) across splits
+        ("max_merge_delta",      float),   # peak merge delta — highlights manipulation boundaries
+        ("std_merge_delta",      float),   # variance of merge deltas — high in real, low in AI
+        # --- optional float=0.0 ---
+        # Per-channel (requires image passed to extract_features)
+        ("mean_complexity_r",    float,    field(default=0.0)),  # mean complexity, red channel
+        ("mean_complexity_g",    float,    field(default=0.0)),  # mean complexity, green channel
+        ("mean_complexity_b",    float,    field(default=0.0)),  # mean complexity, blue channel
+        ("complexity_delta_rg",  float,    field(default=0.0)),  # |mean_r - mean_g|
+        ("complexity_delta_rb",  float,    field(default=0.0)),  # |mean_r - mean_b|
+        ("complexity_delta_gb",  float,    field(default=0.0)),  # |mean_g - mean_b|
+        # Tree-grid spatial map — 256 cells in Morton order (tree_grid_000..255)
+        *[(name, float, field(default=0.0)) for name in TREE_GRID_NAMES],
+        # --- optional metadata ---
+        ("label",          Optional[str],  field(default=None)),  # "authentic"/"synthetic"/"manipulated"
+        ("label_detail",   Optional[str],  field(default=None)),  # e.g. "diffusion", "real_portrait"
+        ("is_real",        int,            field(default=-1)),    # 1=authentic, 0=not, -1=unknown
+        ("dataset_source", str,            field(default="")),    # e.g. "ciplab/real-and-fake-face-detection"
+    ],
+    namespace={"to_dict": _to_dict},
+)
 
 
 # Extractor
 
 def extract_features(root: QuadNode, filename: str, label: str = None,
                     image: np.ndarray = None, scorer=None,
-                    img_shape: tuple = None) -> imageFeatures:
+                    img_shape: tuple = None,
+                    label_detail: str = None,
+                    dataset_source: str = "") -> imageFeatures:
     """
     Extract feature vector from a built quadtree.
     
     Args:
         root:       root QuadNode from QuadTree.build()
         filename:   image filename for identification in CSV
-        label:      optional ground truth label ("real", "ai", "photoshopped")
+        label:      optional ground truth label ("authentic", "synthetic", "manipulated")
         image:      optional numpy array (H, W, C) uint8 — if provided, per-channel
                     complexity features are computed. Must be the same image used
                     to build the tree so leaf coordinates are valid.
@@ -406,7 +165,10 @@ def extract_features(root: QuadNode, filename: str, label: str = None,
         **channel_features,
         **spatial_features,
         
-        label=label
+        label=label,
+        label_detail=label_detail,
+        is_real=1 if label == "authentic" else (0 if label is not None else -1),
+        dataset_source=dataset_source,
     )
 
 
@@ -562,7 +324,7 @@ def _compute_tree_grid(root, target_depth: int) -> dict:
 # CSV export
 
 FEATURE_FIELDS = [
-    "filename", "label",
+    "filename", "label", "label_detail", "is_real", "dataset_source",
     "mean_complexity", "std_complexity", "min_complexity", "max_complexity", "complexity_range",
     "mean_leaf_area", "std_leaf_area", "leaf_count",
     "mean_boundary_delta", "max_boundary_delta",

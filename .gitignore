@@ -9,3 +9,8 @@ results/features/
 examples/overlay/
 
 results/scatter/
+
+# Kaggle credentials
+kaggle.json
+.kaggle/
+.config/kaggle/

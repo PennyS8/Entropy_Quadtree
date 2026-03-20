@@ -36,8 +36,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from features import FEATURE_FIELDS
 
-# Label colors: real=green, ai=red, photoshopped=orange, unknown=grey
+# Label colors: authentic=green, synthetic=red, manipulated=orange, unknown=grey
 LABEL_COLORS = {
+    "authentic":     (34,  197, 94,  220),  # green  — genuine camera images
+    "synthetic":     (239, 68,  68,  220),  # red    — fully AI-generated
+    "manipulated":   (249, 115, 22,  220),  # orange — face-swapped / composited
+    # Legacy aliases so old CSVs still render correctly
     "real":          (34,  197, 94,  220),
     "ai":            (239, 68,  68,  220),
     "photoshopped":  (249, 115, 22,  220),

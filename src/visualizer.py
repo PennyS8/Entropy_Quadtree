@@ -111,7 +111,10 @@ def render_overlay(
                 width=border_width
             )
     
-    # Composite overlay onto base — preserves base alpha
+    # Composite overlay onto base.
+    # alpha_composite requires both images to be RGBA — convert base if needed.
+    if base.mode != "RGBA":
+        base = base.convert("RGBA")
     result = Image.alpha_composite(base, overlay)
 
     # Return RGB if original had no alpha

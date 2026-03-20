@@ -104,12 +104,30 @@ class QuadTree:
         
         self._split(root, image, alpha)
         
-        # Adaptive variance normalization (overlay only)
-        if normalize and root.complexity > 1.0:
-            raw_vals = np.array([n.complexity for n in root.all_leaves()])
-            p99 = float(np.percentile(raw_vals, 99)) or 1.0
-            for node in self._all_nodes(root):
-                node.complexity = float(min(np.sqrt(node.complexity / p99), 1.0))
+        # Per-image normalization (overlay only)
+        # Stretch the complexity range to [0, 1] using the 1st and 99th
+        # percentile of subject leaves so the full colormap is always used
+        # regardless of scoring method. Variance needs this because its raw
+        # values exceed 1; Shannon and compression benefit from it too because
+        # their values rarely span the full [0, 1] range in practice.
+        if normalize:
+            subject_leaves = [n for n in root.all_leaves() if n.background_ratio < BG_THRESHOLD]
+            if subject_leaves:
+                raw_vals = np.array([n.complexity for n in subject_leaves])
+                p01 = float(np.percentile(raw_vals, 1))
+                p99 = float(np.percentile(raw_vals, 99))
+                span = p99 - p01
+                if span < 1e-6:
+                    span = 1e-6
+                # Only apply sqrt gamma for variance — its raw values are
+                # heavily right-skewed (unbounded), so sqrt brings the low end
+                # up into the visible colour range. Shannon and compression
+                # are already roughly uniform in [0,1] so gamma would
+                # over-amplify background noise.
+                needs_gamma = p99 > 1.0
+                for node in self._all_nodes(root):
+                    normed = float(np.clip((node.complexity - p01) / span, 0.0, 1.0))
+                    node.complexity = float(np.sqrt(normed)) if needs_gamma else normed
         
         # Prune below percentile threshold
         if self.threshold is not None:

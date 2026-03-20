@@ -57,7 +57,25 @@ from sklearn.utils import resample
 
 from features import load_csv, FEATURE_FIELDS
 
-FEATURE_COLS = [f for f in FEATURE_FIELDS if f not in ("filename", "label")]
+FEATURE_COLS = [f for f in FEATURE_FIELDS if f not in ("filename", "label", "label_detail", "is_real", "dataset_source")]
+
+# Columns that are never numeric features regardless of CSV schema
+_META_COLS = {"filename", "label", "label_detail", "is_real", "dataset_source"}
+
+# Pure numeric feature names (no metadata) — used to detect schema mismatch
+_NUMERIC_FEATURE_COLS = [f for f in FEATURE_COLS if f not in _META_COLS]
+
+
+def infer_feature_cols(csv_path: str) -> list:
+    """
+    Read the CSV header and return all columns that look like numeric features.
+    Used automatically when the CSV schema doesn't match FEATURE_COLS,
+    e.g. merged multi-method CSVs with prefixed columns like shannon_mean_complexity.
+    """
+    import csv as _csv
+    with open(csv_path, newline="") as f:
+        header = next(_csv.reader(f))
+    return [col for col in header if col not in _META_COLS]
 
 CLASSIFIERS_FULL = {
     "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
@@ -102,11 +120,18 @@ def parse_args():
 
 
 def detect_outliers(x: np.ndarray, feature_cols: list):
+    if x.ndim != 2 or x.shape[0] == 0:
+        raise ValueError(
+            f"No valid samples loaded (x.shape={x.shape}). "
+            "The feature column names don't match the CSV header. "
+            "Pass --features explicitly, or omit it to let classify.py auto-detect."
+        )
     n = len(x)
     outlier_mask = np.zeros(n, dtype=bool)
     lines = ["Outlier Detection (3*IQR beyond 1st/99th percentile)"]
     lines.append(f"  {chr(39)+'Feature'+chr(39):<25} {chr(39)+'Mean'+chr(39):>8} {chr(39)+'Std'+chr(39):>8} {chr(39)+'Min'+chr(39):>8} {chr(39)+'Max'+chr(39):>8} {chr(39)+'Outliers'+chr(39):>10}")
     lines.append(" " + "-" * 75)
+    tg_outlier_total = 0
     for i, col in enumerate(feature_cols):
         vals = x[:, i]
         q1, q3 = np.percentile(vals, [1, 99])
@@ -115,7 +140,13 @@ def detect_outliers(x: np.ndarray, feature_cols: list):
         hi = q3 + 3 * iqr
         col_outliers = (vals < lo) | (vals > hi)
         outlier_mask |= col_outliers
-        lines.append(f"  {col:<25} {vals.mean():>8.4f} {vals.std():>8.4f} {vals.min():>8.4f} {vals.max():>8.4f} {col_outliers.sum():>10}")
+        if col.startswith("tree_grid_"):
+            tg_outlier_total += int(col_outliers.sum())
+        else:
+            lines.append(f"  {col:<25} {vals.mean():>8.4f} {vals.std():>8.4f} {vals.min():>8.4f} {vals.max():>8.4f} {col_outliers.sum():>10}")
+    tg_cols = [c for c in feature_cols if c.startswith("tree_grid_")]
+    if tg_cols:
+        lines.append(f"  tree_grid_000..255        ({len(tg_cols)} spatial cells, {tg_outlier_total} outliers)")
     total = outlier_mask.sum()
     lines.append(f"Total outlier rows removed: {total} / {n} ({100*total/n:.2f}%)")
     return outlier_mask, "\n".join(lines)
@@ -124,7 +155,7 @@ def detect_outliers(x: np.ndarray, feature_cols: list):
 def load_data(csv_path: str, feature_cols: list, balance: bool):
     rows = load_csv(csv_path)
 
-    x, y = [], []
+    x, y, filenames = [], [], []
     skipped = 0
     for row in rows:
         label = row.get("label", "").strip()
@@ -138,9 +169,11 @@ def load_data(csv_path: str, feature_cols: list, balance: bool):
             continue
         x.append(feats)
         y.append(label)
+        filenames.append(row.get("filename", ""))
 
     x = np.array(x)
     y = np.array(y)
+    filenames = np.array(filenames)
 
     if skipped:
         print(f"Skipped {skipped} rows with missing labels or features.")
@@ -149,22 +182,25 @@ def load_data(csv_path: str, feature_cols: list, balance: bool):
     outlier_mask, outlier_report = detect_outliers(x, feature_cols)
     x = x[~outlier_mask]
     y = y[~outlier_mask]
+    filenames = filenames[~outlier_mask]
     print(outlier_report)
     
     if balance:
         classes, counts = np.unique(y, return_counts=True)
         min_count = counts.min()
-        x_bal, y_bal = [], []
+        x_bal, y_bal, fn_bal = [], [], []
         for cls in classes:
             mask = y == cls
-            x_cls, y_cls = resample(x[mask], y[mask], n_samples=min_count, random_state=42)
+            x_cls, y_cls, fn_cls = resample(x[mask], y[mask], filenames[mask], n_samples=min_count, random_state=42)
             x_bal.append(x_cls)
             y_bal.append(y_cls)
+            fn_bal.append(fn_cls)
         x = np.vstack(x_bal)
         y = np.concatenate(y_bal)
+        filenames = np.concatenate(fn_bal)
         print(f"Balanced to {min_count} samples per class.")
 
-    return x, y, outlier_report
+    return x, y, filenames, outlier_report
 
 
 def format_confusion_matrix(cm, labels):
@@ -181,7 +217,8 @@ def evaluate(name, clf,
     x_train, x_test,
     y_train, y_test,
     feature_cols, cv_scores,
-    show_permutation_importance=False
+    show_permutation_importance=False,
+    fn_test=None
 ):
     clf.fit(x_train, y_train)
     y_pred = clf.predict(x_test)
@@ -192,6 +229,19 @@ def evaluate(name, clf,
     rec  = recall_score(y_test, y_pred, average="weighted", zero_division=0)
     f1   = f1_score(y_test, y_pred, average="weighted", zero_division=0)
     cm   = confusion_matrix(y_test, y_pred, labels=labels)
+
+    # Misclassified files (printed to console, not saved to report)
+    if fn_test is not None:
+        for true_label in sorted(set(y_test)):
+            for pred_label in sorted(set(y_test)):
+                if true_label == pred_label:
+                    continue
+                mask = (np.array(y_test) == true_label) & (np.array(y_pred) == pred_label)
+                files = [fn_test[i] for i in range(len(fn_test)) if mask[i]]
+                if files:
+                    print(f"  [{name}] true={true_label} predicted={pred_label} ({len(files)} files):")
+                    # for fn in files:
+                    #     print(f"    {fn}")
 
     lines = []
     lines.append(f"\n{'='*60}")
@@ -207,11 +257,17 @@ def evaluate(name, clf,
 
     # Feature importances (Random Forest / Gradient Boosting only)
     if hasattr(clf, "feature_importances_"):
-        lines.append(f"\n  Feature importances:")
+        lines.append(f"\n  Feature importances (non-spatial only):")
         importances = sorted(zip(feature_cols, clf.feature_importances_), key=lambda x: -x[1])
+        tg_imp_total = sum(imp for feat, imp in importances if feat.startswith("tree_grid_"))
         for feat, imp in importances:
+            if feat.startswith("tree_grid_"):
+                continue
             bar = "█" * int(imp * 40)
             lines.append(f"    {feat:<25} {imp:.4f}  {bar}")
+        if tg_imp_total > 0:
+            bar = "█" * int(tg_imp_total * 40)
+            lines.append(f"    {'tree_grid_* (256 cells)':<25} {tg_imp_total:.4f}  {bar}  (combined)")
     
     # Permutation importance (opt-in, RF and GB only)
     if show_permutation_importance and hasattr(clf, "feature_importances_"):
@@ -221,17 +277,29 @@ def evaluate(name, clf,
             zip(feature_cols, result.importances_mean, result.importances_std),
             key=lambda x: -x[1]
         )
+        tg_perm_mean = sum(m for f, m, _ in perm_sorted if f.startswith("tree_grid_"))
+        tg_perm_std  = np.mean([s for f, _, s in perm_sorted if f.startswith("tree_grid_")]) if any(f.startswith("tree_grid_") for f, _, _ in perm_sorted) else 0.0
         for feat, mean, std in perm_sorted:
+            if feat.startswith("tree_grid_"):
+                continue
             bar = "█" * max(0, int(mean * 40))
             lines.append(f"    {feat:<25} {mean:+.4f} ± {std:.4f}  {bar}")
+        if any(f.startswith("tree_grid_") for f, _, _ in perm_sorted):
+            bar = "█" * max(0, int(tg_perm_mean * 40))
+            lines.append(f"    {'tree_grid_* (256 cells)':<25} {tg_perm_mean:+.4f} ± {tg_perm_std:.4f}  {bar}  (combined)")
     
     # Logistic regression coefficients
     if hasattr(clf, "coef_"):
-        lines.append(f"\n  Coefficients:")
+        lines.append(f"\n  Coefficients (non-spatial only):")
         for label, coefs in zip(clf.classes_, clf.coef_):
             lines.append(f"    [{label}]")
+            tg_coef_sum = sum(abs(c) for f, c in zip(feature_cols, coefs) if f.startswith("tree_grid_"))
             for feat, coef in zip(feature_cols, coefs):
+                if feat.startswith("tree_grid_"):
+                    continue
                 lines.append(f"      {feat:<25} {coef:+.4f}")
+            if tg_coef_sum > 0:
+                lines.append(f"      {'tree_grid_* (256 cells)':<25} (sum |coef|={tg_coef_sum:.4f})")
 
     return "\n".join(lines), acc
 
@@ -300,15 +368,32 @@ def main():
         sys.exit(1)
 
     print(f"Loading {args.csv}...")
-    x, y, outlier_report = load_data(args.csv, args.features, args.balance)
+
+    # Auto-detect feature columns when the CSV schema doesn't match FEATURE_COLS.
+    # The check uses _NUMERIC_FEATURE_COLS (pure numeric, no metadata fields) so
+    # columns like label_detail/is_real that appear in both schemas don't cause
+    # a false "schema matches" result.
+    feature_cols_arg = args.features
+    if feature_cols_arg == FEATURE_COLS:
+        import csv as _csv
+        with open(args.csv, newline="") as _f:
+            csv_header = set(next(_csv.reader(_f)))
+        if not any(col in csv_header for col in _NUMERIC_FEATURE_COLS):
+            feature_cols_arg = infer_feature_cols(args.csv)
+            print(f"Auto-detected {len(feature_cols_arg)} feature columns from CSV header "
+                  "(merged/non-standard schema). Pass --features explicitly to override.\n")
+
+    x, y, filenames, outlier_report = load_data(args.csv, feature_cols_arg, args.balance)
 
     classes, counts = np.unique(y, return_counts=True)
     print(f"Classes: {dict(zip(classes, counts))}")
-    print(f"Features: {args.features}")
+    visible = [f for f in feature_cols_arg if not f.startswith("tree_grid_")]
+    tg_count = sum(1 for f in feature_cols_arg if f.startswith("tree_grid_"))
+    print(f"Features: {visible}" + (f" + {tg_count} tree_grid spatial cells" if tg_count else ""))
     print(f"Total samples: {len(y)}")
 
-    x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=args.test_size, random_state=42, stratify=y
+    x_train, x_test, y_train, y_test, fn_train, fn_test = train_test_split(
+        x, y, filenames, test_size=args.test_size, random_state=42, stratify=y
     )
 
     # Scale features — required for LR and SVM, harmless for tree methods
@@ -318,7 +403,7 @@ def main():
 
     # --- Optional feature pruning -----------------------------------------
     prune_report = ""
-    feature_cols = list(args.features)
+    feature_cols = list(feature_cols_arg)
 
     if args.prune_features is not None:
         kept, dropped, prune_report = prune_features(
@@ -339,7 +424,10 @@ def main():
         print(f"Continuing with {len(kept)} features.\n")
     # ----------------------------------------------------------------------
 
-    print(f"Features ({len(feature_cols)}): {feature_cols}")
+    visible_cols = [f for f in feature_cols if not f.startswith("tree_grid_")]
+    tg_n = len(feature_cols) - len(visible_cols)
+    suffix = f" + {tg_n} tree_grid spatial cells" if tg_n else ""
+    print(f"Features ({len(feature_cols)}): {visible_cols}{suffix}")
     print(f"\nTrain: {len(y_train)}  Test: {len(y_test)}\n")
 
     classifiers = CLASSIFIERS_FAST if args.fast else CLASSIFIERS_FULL
@@ -369,7 +457,7 @@ def main():
             x_tr, x_te = x_train_s, x_test_s
         cv_scores = cross_val_score(clf, x_tr, y_train, cv=cv, scoring="accuracy", n_jobs=-1)
         perm_imp = getattr(args, "permutation_importance", False)
-        report, acc = evaluate(name, clf, x_tr, x_te, y_train, y_test, feature_cols, cv_scores, perm_imp)
+        report, acc = evaluate(name, clf, x_tr, x_te, y_train, y_test, feature_cols, cv_scores, perm_imp, fn_test=fn_test)
         print(f"accuracy={acc:.4f}")
         all_lines.append(report)
         results.append((name, acc))
