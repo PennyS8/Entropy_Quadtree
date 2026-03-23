@@ -1,0 +1,6 @@
+{
+  "stylegan_v1_shannon": 36,
+  "stylegan_v1_compression": 29,
+  "deepfacelab_shannon": 33,
+  "deepfacelab_compression": 59
+}

@@ -1,7 +1,8 @@
 """
 visualizer.py
 
-Renders the complexity quadtree as an overlay on the original image.
+Renders the quadtree complexity map as a colour overlay on the original image.
+Part of the Quadtree Complexity Analysis for Image Forensics pipeline.
 
 Transparency is preserved — RGBA images remain RGBA in the output.
 Background nodes (background_ratio >= BG_THRESHOLD) are drawn as neutral
@@ -164,10 +165,9 @@ def save_result(
         image:          numpy array (H, W, C) uint8 RGB
         root:           built QuadNode root
         output_path:    file path to save (e.g. "output.png")
-        fill_alpha:     opacity of complexity fill
-        show_borders:   draw quadrant borders
+        fill_alpha:     opacity of complexity fill (0–255)
+        show_borders:   draw quadrant border lines
         include_legend: append a colorbar legend below the image
-        bg_threshold:   nodes with background_ratio >= this are skipped
     """
     result = render_overlay(image, root, fill_alpha=fill_alpha, show_borders=show_borders)
     

@@ -1,7 +1,8 @@
 """
 tune_threshold.py
 
-Tune the quadtree pruning threshold hyperparameter without trial and error.
+Tune the quadtree complexity pruning threshold hyperparameter.
+Part of the Quadtree Complexity Analysis for Image Forensics pipeline.
 
 Strategy:
     Build each image's quadtree ONCE, then apply different prune cutoffs
@@ -42,7 +43,6 @@ Optional args:
     --method        shannon|compression|variance (default: shannon)
     --leaf_size     int (default: 4; use 16 for compression)
     --cv            cross-validation folds (default: 5)
-    --workers       parallel image loading workers (default: 4)
     --max_images    cap images per class — useful for fast pilot runs
     --output        base output folder or CSV path (default: results/tuning/)
                     if a folder is given, file is written as {method}.csv inside it
@@ -65,18 +65,25 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from complexity import get_scorer
 from quadtree import QuadTree, QuadNode, BG_THRESHOLD
-from features import extract_features
+from features import extract_features, FEATURE_FIELDS as _ALL_FEATURE_FIELDS
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold, cross_val_score
+import config
+from config import setup_logging, get_logger
+
+log = get_logger(__name__)
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
 
+# Use the scalar features only (no metadata, no spatial grid) for threshold tuning.
+# The spatial grid cells are excluded here because tune_thresholds sweeps threshold
+# values in memory by re-pruning the same trees — the grid features are less sensitive
+# to the pruning threshold than the scalar features and add noise to the CV signal.
+_META = {"filename", "label", "label_detail", "is_real", "dataset_source"}
 FEATURE_FIELDS = [
-    "mean_complexity", "std_complexity", "min_complexity", "max_complexity",
-    "complexity_range", "mean_leaf_area", "std_leaf_area", "leaf_count",
-    "mean_boundary_delta", "max_boundary_delta", "mean_depth", "std_depth",
-    "mean_merge_delta", "max_merge_delta", "std_merge_delta",
+    f for f in _ALL_FEATURE_FIELDS
+    if f not in _META and not f.startswith("tree_grid_")
 ]
 
 
@@ -213,7 +220,7 @@ def leaf_stats(built_trees, threshold_pct):
 # ── Argument parsing ─────────────────────────────────────────────────────────
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Tune quadtree pruning threshold.")
+    parser = argparse.ArgumentParser(description="Tune quadtree complexity pruning threshold for optimal feature extraction.")
     parser.add_argument("--input", nargs="+", required=True,
                         help="Input folders (one per class)")
     parser.add_argument("--labels", nargs="+", required=True,
@@ -225,21 +232,57 @@ def parse_args():
                         default="shannon",
                         help="Complexity scoring method (default: shannon). "
                              "Use compression with --leaf_size 16 for best results.")
-    parser.add_argument("--leaf_size", type=int, default=4,
+    parser.add_argument("--leaf-size", type=int, default=4,
                         help="Target leaf side length in pixels (default: 4; use 16 for compression)")
     parser.add_argument("--cv", type=int, default=5,
                         help="Cross-validation folds (default: 5)")
-    parser.add_argument("--workers", type=int, default=min(4, cpu_count()),
-                        help="Parallel workers for image loading (default: 4)")
-    parser.add_argument("--max_images", type=int, default=None,
+    parser.add_argument("--max-images", type=int, default=None,
                         help="Max images per class (for fast pilot runs)")
     parser.add_argument("--output", default="results/tuning",
                         help="Output folder or CSV path (default: results/tuning). "
-                             "If a folder, file is written as {method}.csv inside it.")
+                             "If a folder, file is written as {name}/{method}.csv inside it.")
+    parser.add_argument("--name", default=None,
+                        help="Dataset identifier used in the output path: "
+                             "results/tuning/{name}/{method}.csv. "
+                             "Auto-derived from the input path if inputs follow the "
+                             "data/sample/{name}/{label}/ convention (default: auto).")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable DEBUG logging")
     parser.add_argument("--append", action="store_true",
                         help="Append to existing tuning CSV instead of overwriting. "
                              "Duplicate thresholds are replaced by the new run.")
     return parser.parse_args()
+
+
+def infer_name(input_folders: list) -> str:
+    """
+    Auto-derive a dataset name from input folder paths.
+
+    Flat convention data/sample/{name}_{label}/:
+        data/sample/stylegan_v1_synthetic  ->  stylegan_v1
+        data/sample/FFHQ_authentic         ->  FFHQ
+        data/sample/deepfacelab_manipulated -> deepfacelab
+
+    Legacy nested convention data/sample/{name}/{label}/:
+        data/sample/stylegan_v1/synthetic  ->  stylegan_v1
+
+    Falls back to the basename of the first input if neither pattern matches.
+    """
+    for folder in input_folders:
+        parts = folder.replace("\\", "/").rstrip("/").split("/")
+        if "sample" in parts:
+            idx = parts.index("sample")
+            if idx + 1 < len(parts):
+                folder_name = parts[idx + 1]
+                # Flat: {name}_{label} — strip known label suffixes
+                for suffix in ("_authentic", "_synthetic", "_manipulated"):
+                    if folder_name.endswith(suffix):
+                        return folder_name[: -len(suffix)]
+                # Legacy nested: next part is the name, part after is the label
+                if idx + 2 < len(parts):
+                    return folder_name
+    # Fallback: basename of first input
+    return os.path.basename(os.path.abspath(input_folders[0]))
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -247,8 +290,9 @@ def parse_args():
 def main():
     args = parse_args()
 
+    setup_logging(getattr(args, "verbose", False))
     if len(args.input) != len(args.labels):
-        print("Error: --input and --labels must have the same number of entries.")
+        log.error("--input and --labels must have the same number of entries.")
         sys.exit(1)
 
     # Collect image paths per class
@@ -265,55 +309,45 @@ def main():
         for fname in entries:
             tasks.append((os.path.join(folder, fname), label, args.method, args.leaf_size))
 
-    print(f"\nThreshold Tuning")
-    print(f"{'─'*50}")
-    print(f"Method:      {args.method}")
-    print(f"Leaf size:   {args.leaf_size}px")
-    print(f"Thresholds:  {args.thresholds}")
-    print(f"CV folds:    {args.cv}")
-    print(f"Workers:     {args.workers}")
-    print(f"Classes:     {class_counts}")
-    print(f"Total images:{len(tasks)}\n")
+    # Resolve name early — used in both the startup print and output path
+    name = args.name or infer_name(args.input)
+
+    log.info("Threshold Tuning")
+
+    log.info("Name:      %s", name)
+    log.info("Method:    %s", args.method)
+    log.info("Leaf size: %dpx", args.leaf_size)
+    log.info("Thresholds: %s", args.thresholds)
+    log.info("CV folds:  %d", args.cv)
+    log.info("Classes:   %s", class_counts)
+    log.info("Total images: %d", len(tasks))
 
     # ── Phase 1: Build all trees once ────────────────────────────────────────
-    print(f"Phase 1: Building quadtrees (this is the slow part)...")
+    log.info("Phase 1: Building quadtrees...")
     t0 = time.time()
 
     built_trees = []  # list of (filename, label, root)
     errors = 0
 
-    if args.workers > 1:
-        with Pool(processes=args.workers) as pool:
-            for i, (fname, label, root, err) in enumerate(
-                pool.imap_unordered(build_tree_for_image, tasks), 1
-            ):
-                if err:
-                    print(f"  ERROR {fname}: {err.splitlines()[-1]}")
-                    errors += 1
-                else:
-                    built_trees.append((fname, label, root))
-                if i % 100 == 0 or i == len(tasks):
-                    print(f"  {i}/{len(tasks)} trees built...")
-    else:
-        for i, task in enumerate(tasks, 1):
-            fname, label, root, err = build_tree_for_image(task)
-            if err:
-                print(f"  ERROR {fname}: {err.splitlines()[-1]}")
-                errors += 1
-            else:
-                built_trees.append((fname, label, root))
-            if i % 100 == 0 or i == len(tasks):
-                print(f"  {i}/{len(tasks)} trees built...")
+    for i, task in enumerate(tasks, 1):
+        fname, label, root, err = build_tree_for_image(task)
+        if err:
+            log.error("  %s: %s", fname, err.splitlines()[-1])
+            errors += 1
+        else:
+            built_trees.append((fname, label, root))
+        if i % 100 == 0 or i == len(tasks):
+            log.info("  %d/%d trees built...", i, len(tasks))
 
     build_time = time.time() - t0
-    print(f"\nBuilt {len(built_trees)} trees in {build_time:.1f}s  ({errors} errors)\n")
+    log.info("Built %d trees in %.1fs  (%d errors)", len(built_trees), build_time, errors)
 
     if not built_trees:
-        print("No trees built — check your input paths.")
+        log.error("No trees built — check your input paths.")
         sys.exit(1)
 
     # ── Phase 2: Sweep thresholds ─────────────────────────────────────────────
-    print(f"Phase 2: Sweeping {len(args.thresholds)} threshold values...")
+    log.info("Phase 2: Sweeping %d threshold values...", len(args.thresholds))
     print(f"\n{'Threshold':>10}  {'Mean Leaves':>12}  {'CV Accuracy':>12}  {'± Std':>8}  {'Time':>8}")
     print(f"{'─'*10}  {'─'*12}  {'─'*12}  {'─'*8}  {'─'*8}")
 
@@ -349,21 +383,21 @@ def main():
             "cv_accuracy_std": std_acc,
         })
 
-    # Resolve output path: folder -> results/tuning/{method}.csv
+    # Resolve output path: results/tuning/{name}/{method}.csv
     output_arg = args.output
     if output_arg.endswith(".csv"):
         out_path = output_arg
     else:
-        out_path = os.path.join(output_arg.rstrip("/"), f"{args.method}.csv")
+        out_path = os.path.join(output_arg.rstrip("/"), name, f"{args.method}.csv")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     # ── Summary ───────────────────────────────────────────────────────────────
-    print(f"\n{'─'*50}")
-    print(f"Best threshold: {best_threshold}  (CV accuracy: {best_acc:.4f})")
-    print(f"\nRecommendation:")
-    print(f"  python3 src/batch.py --input <folder> --output results/features/ \\")
-    print(f"      --method {args.method} --leaf_size {args.leaf_size} \\")
-    print(f"      --threshold {best_threshold}")
+
+    log.info("Best threshold: %s  (CV accuracy: %.4f)", best_threshold, best_acc)
+    log.info("Recommendation:")
+    log.info("  python3 src/batch.py --input <folder> --output results/features/ \\")
+    log.info("      --method %s --leaf-size %d \\", args.method, args.leaf_size)
+    log.info("      --threshold %s", best_threshold)
 
     # ── Save results ──────────────────────────────────────────────────────────
     fieldnames = list(results[0].keys())
@@ -379,13 +413,32 @@ def main():
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(merged_rows)
-        print(f"\nAppended {len(results)} entries -> {out_path} ({len(merged_rows)} total)")
+        log.info("Appended %d entries → %s (%d total)", len(results), out_path, len(merged_rows))
     else:
         with open(out_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(results[0].keys()))
             writer.writeheader()
             writer.writerows(results)
-        print(f"\nResults saved: {out_path}")
+        log.info("Results saved: %s", out_path)
+
+    # ── Write best threshold to shared JSON ───────────────────────────────────
+    # Keyed as {name}_{method} so the Makefile can read thresholds for phase 2
+    # without hard-coding them. All tune runs merge into the same file so running
+    # tune-stylegan then tune-deepfacelab produces a single complete lookup table.
+    import json
+    best_path = os.path.join("results", "tuning", "best_thresholds.json")
+    try:
+        with open(best_path) as f:
+            best_all = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        best_all = {}
+
+    key = f"{name}_{args.method}"
+    best_all[key] = best_threshold
+    os.makedirs(os.path.dirname(best_path), exist_ok=True)
+    with open(best_path, "w") as f:
+        json.dump(best_all, f, indent=2)
+    log.info("Best threshold [%s] = %s  →  %s", key, best_threshold, best_path)
 
 
 if __name__ == "__main__":

@@ -94,7 +94,7 @@ def compression_entropy(region: np.ndarray, mask: np.ndarray = None) -> float:
     # Clamp to [0, 1], compressed can rarely exceed orgional for tiny regions
     return float(min(ratio, 1.0))
 
-def variance_complexity(region: np.ndarray, mask: np.ndarray = None) -> None:
+def variance_complexity(region: np.ndarray, mask: np.ndarray = None) -> float:
     """
     Estimate complexity as normalised pixel variance
     

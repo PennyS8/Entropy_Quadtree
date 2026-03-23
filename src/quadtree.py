@@ -1,7 +1,8 @@
 """
 quadtree.py
 
-Builds a complexity quadtree over an image.
+Builds an adaptive complexity quadtree over an image.
+Core data structure for the Quadtree Complexity Analysis for Image Forensics pipeline.
 
 Splitting stops when either:
     leaf_size is reached (fixed mode).
@@ -232,8 +233,8 @@ class QuadTree:
 
 # Convenience stats
 
-def tree_stats(root: QuadNode, bg_threshold: float = 0.5) -> dict:
-    """Summary statistics for a built quadtree."""
+def tree_stats(root: QuadNode) -> dict:
+    """Summary statistics for a built quadtree. Background nodes are excluded using BG_THRESHOLD."""
     all_leaves = root.all_leaves()
     subject_leaves = [n for n in all_leaves if n.background_ratio < BG_THRESHOLD]
     

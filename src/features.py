@@ -1,10 +1,13 @@
 """
 features.py
 
-Extracts a feature vector from a built quadtree for downstream analysis.
+Extracts a complexity feature vector from a built quadtree for use in
+image forensics classification.
 
-Features are designed to distinguish authentic photographs, synthetic AI-generated
-images, and manipulated (face-swapped/composited) images based on complexity distribution properties.
+Part of the Quadtree Complexity Analysis for Image Forensics pipeline.
+Features characterise the spatial distribution of image complexity to
+distinguish authentic photographs from synthetic (AI-generated) and
+manipulated (face-swapped/composited) images.
 
 Output can be saved as CSV for use in scatter plots or classifiers.
 """
@@ -43,9 +46,14 @@ TREE_GRID_NAMES = ["tree_grid_{:03d}".format(i) for i in range(TREE_GRID_SIZE)]
 # instead of 300.
 #
 # Field layout (dataclass rules: required fields must precede fields with defaults):
-#   1. Required (no default): filename + 15 scalar metrics
+#   1. Required (no default): filename + 9 scalar metrics
 #   2. Optional float=0.0:    per-channel features, then 256 tree_grid cells
 #   3. Optional metadata:     label, label_detail, is_real, dataset_source
+#
+# Removed as confirmed-dead (zero permutation importance across all runs):
+#   mean_leaf_area, std_leaf_area, leaf_count  — constant for fixed leaf_size
+#   mean_depth, std_depth                      — constant for fixed leaf_size
+#   max_complexity                             — almost always exactly 1.0
 
 def _to_dict(self) -> dict:
     always = {"label", "label_detail", "is_real", "dataset_source"}
@@ -55,24 +63,15 @@ imageFeatures = make_dataclass(
     "imageFeatures",
     fields=[
         # --- required (no default) ---
-        # filename
         ("filename",             str),
         # Global complexity distribution (subject nodes only)
         ("mean_complexity",      float),   # average complexity across subject leaves
         ("std_complexity",       float),   # variance of complexity — low in AI images
         ("min_complexity",       float),   # floor of complexity
-        ("max_complexity",       float),   # ceiling of complexity
         ("complexity_range",     float),   # max - min — spread of the distribution
-        # Spatial structure
-        ("mean_leaf_area",       float),   # average subject leaf area in pixels
-        ("std_leaf_area",        float),   # variance in leaf area, high = adaptive splits
-        ("leaf_count",           int),     # total subject leaf count
         # Boundary signal
         ("mean_boundary_delta",  float),   # average |parent - child| complexity at splits
         ("max_boundary_delta",   float),   # maximum boundary jump, manipulation signal
-        # Depth distribution
-        ("mean_depth",           float),   # how deep the tree goes on average
-        ("std_depth",            float),   # variance in depth
         # Merge-step delta — information gain at each split
         ("mean_merge_delta",     float),   # average std(children)/(parent+eps) across splits
         ("max_merge_delta",      float),   # peak merge delta — highlights manipulation boundaries
@@ -90,8 +89,8 @@ imageFeatures = make_dataclass(
         # --- optional metadata ---
         ("label",          Optional[str],  field(default=None)),  # "authentic"/"synthetic"/"manipulated"
         ("label_detail",   Optional[str],  field(default=None)),  # e.g. "diffusion", "real_portrait"
-        ("is_real",        int,            field(default=-1)),    # 1=authentic, 0=not, -1=unknown
-        ("dataset_source", str,            field(default="")),    # e.g. "ciplab/real-and-fake-face-detection"
+        ("is_real",        int,            field(default=-1)),     # 1=authentic, 0=not, -1=unknown
+        ("dataset_source", str,            field(default="")),     # e.g. "ciplab/real-and-fake-face-detection"
     ],
     namespace={"to_dict": _to_dict},
 )
@@ -128,8 +127,6 @@ def extract_features(root: QuadNode, filename: str, label: str = None,
         subject_leaves = all_leaves
     
     complexities    = np.array([n.complexity    for n in subject_leaves])
-    areas           = np.array([n.w * n.h       for n in subject_leaves], dtype=float)
-    depths          = np.array([n.depth         for n in subject_leaves], dtype=float)
     
     # Boundary delta: for every internal node, measure complexity jump to children
     boundary_deltas = _compute_boundary_deltas(root)
@@ -145,18 +142,10 @@ def extract_features(root: QuadNode, filename: str, label: str = None,
         mean_complexity=float(np.mean(complexities)),
         std_complexity=float(np.std(complexities)),
         min_complexity=float(np.min(complexities)),
-        max_complexity=float(np.max(complexities)),
         complexity_range=float(np.max(complexities) - np.min(complexities)),
-
-        mean_leaf_area=float(np.mean(areas)),
-        std_leaf_area=float(np.std(areas)),
-        leaf_count=len(subject_leaves),
 
         mean_boundary_delta=float(np.mean(boundary_deltas)) if len(boundary_deltas) else 0.0,
         max_boundary_delta=float(np.max(boundary_deltas))  if len(boundary_deltas) else 0.0,
-
-        mean_depth=float(np.mean(depths)),
-        std_depth=float(np.std(depths)),
 
         mean_merge_delta=float(np.mean(merge_deltas)) if len(merge_deltas) else 0.0,
         max_merge_delta=float(np.max(merge_deltas))  if len(merge_deltas) else 0.0,
@@ -325,10 +314,8 @@ def _compute_tree_grid(root, target_depth: int) -> dict:
 
 FEATURE_FIELDS = [
     "filename", "label", "label_detail", "is_real", "dataset_source",
-    "mean_complexity", "std_complexity", "min_complexity", "max_complexity", "complexity_range",
-    "mean_leaf_area", "std_leaf_area", "leaf_count",
+    "mean_complexity", "std_complexity", "min_complexity", "complexity_range",
     "mean_boundary_delta", "max_boundary_delta",
-    "mean_depth", "std_depth",
     "mean_merge_delta", "max_merge_delta", "std_merge_delta",
     "mean_complexity_r", "mean_complexity_g", "mean_complexity_b",
     "complexity_delta_rg", "complexity_delta_rb", "complexity_delta_gb",

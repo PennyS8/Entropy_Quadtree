@@ -1,16 +1,83 @@
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
 
-# Feature CSVs — large, regenerable from source data
-results/features/
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env
 
-# Generated overlay images
-examples/overlay/
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+.DS_Store
+Thumbs.db
+desktop.ini
 
-results/scatter/
-
-# Kaggle credentials
+# ── Kaggle credentials — never commit ─────────────────────────────────────────
 kaggle.json
 .kaggle/
-.config/kaggle/
+
+# ── Downloaded image samples ──────────────────────────────────────────────────
+# Format: data/sample/{name}_{label}/
+# Recreate with stream_batch.py --save-sample
+data/sample/
+
+# ── Extracted feature CSVs ────────────────────────────────────────────────────
+# Format: results/features/{name}_{method}.csv
+# Recreate with stream_batch.py (phase 2 of pipeline.md)
+results/features/
+
+# ── Saved model bundles ───────────────────────────────────────────────────────
+# Format: results/models/{name}.joblib
+# Recreate with classify.py --save-model (phase 3 of pipeline.md)
+results/models/
+
+# ── Threshold tuning CSVs (keep plots) ───────────────────────────────────────
+# Format: results/tuning/{name}/{method}.csv
+# Recreate with tune_thresholds.py (phase 1 of pipeline.md)
+results/tuning/**/*.csv
+
+# ── Classification reports ────────────────────────────────────────────────────
+# Format: results/classify/{name}.txt
+# Recreate with classify.py
+results/classify/
+
+# ── Scatter plots ─────────────────────────────────────────────────────────────
+# Recreate with scatter.py
+results/scatter/
+
+# ── Prediction outputs ────────────────────────────────────────────────────────
+# Recreate with predict.py
+results/predictions/
+
+# ── Overlay images ────────────────────────────────────────────────────────────
+# Recreate with main.py or predict.py --overlay
+results/overlays/
+
+# ── Grid importance outputs ───────────────────────────────────────────────────
+# Recreate with grid_importance.py
+results/grid_importance/
+
+# ── Depth distribution outputs ────────────────────────────────────────────────
+# Recreate with depth_distribution.py
+results/depth/
+
+# ── Keep tracked ─────────────────────────────────────────────────────────────
+# Example overlays referenced in README
+!results/examples/
+# Tuning plots are small and useful to track
+!results/tuning/**/*.png
+# .gitkeep files preserve empty directory structure
+!**/.gitkeep

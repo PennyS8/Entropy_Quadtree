@@ -1,85 +1,76 @@
 """
 stream_batch.py
 
-Stream images directly from a Kaggle dataset into memory, process them,
-and write features to CSV — without ever storing images on disk.
+Stream images directly from a Kaggle dataset into memory, extract quadtree
+complexity features, and write them to CSV — without storing images to disk.
+Part of the Quadtree Complexity Analysis for Image Forensics pipeline.
 
-Downloads the dataset zip into memory, iterates entries with zipfile — each
-image is decompressed into a BytesIO buffer, processed through the quadtree
-pipeline, and discarded. No temp files are written at any point.
-
-New in this version:
-    --methods          multiple scorers in one pass (one download, N CSVs)
-    --resize           normalise resolution before processing
-    --max_per_dataset  per-dataset cap to prevent large datasets dominating
-    --label_detail     descriptive sublabel alongside the general class label
+Downloads the dataset zip into memory once, then iterates entries in chunks —
+each image is decompressed, processed, and freed before the next chunk loads.
+Peak memory is bounded by --chunk-size rather than the full dataset size.
 
 Setup:
     pip install kaggle requests Pillow numpy
 
 Usage:
-    # Explore dataset structure first
-    python3 src/stream_batch.py \\
-        --dataset ciplab/real-and-fake-face-detection \\
+    # Explore dataset structure before processing
+    python3 src/stream_batch.py \
+        --dataset ciplab/real-and-fake-face-detection \
         --explore
 
-    # Single method
-    python3 src/stream_batch.py \\
-        --dataset ciplab/real-and-fake-face-detection \\
-        --classes training_fake training_real \\
-        --labels manipulated authentic \\
-        --label_detail gan_faceswap authentic_portrait \\
-        --prefix real_and_fake_face \\
-        --methods compression \\
-        --resize 256
+    # Extract two methods in one pass (one download, two CSVs)
+    python3 src/stream_batch.py \
+        --dataset ciplab/real-and-fake-face-detection \
+        --classes training_fake training_real \
+        --labels manipulated authentic \
+        --label-detail gan_faceswap authentic_portrait \
+        --prefix real_and_fake_face \
+        --methods compression shannon \
+        --resize 256 --name ciplab_faces
+    # -> results/features/ciplab_faces_shannon.csv
+    # -> results/features/ciplab_faces_compression.csv
 
-    # Two methods in one pass (one download, two CSVs)
-    python3 src/stream_batch.py \\
-        --dataset ciplab/real-and-fake-face-detection \\
-        --classes training_fake training_real \\
-        --labels manipulated authentic \\
-        --label_detail gan_faceswap authentic_portrait \\
-        --prefix real_and_fake_face \\
-        --methods compression shannon \\
-        --resize 256 --workers 8
-
-    # Append wish096 to the same CSVs
-    python3 src/stream_batch.py \\
-        --dataset wish096/realvsfake-81k-by-wish \\
-        --classes Fake Real \\
-        --labels synthetic authentic \\
-        --label_detail gan_portrait authentic_portrait \\
-        --prefix RealVsFake/RealVsFake \\
-        --methods compression shannon \\
-        --resize 256 --max_per_dataset 2000 --workers 8 \\
-        --append
+    # Extract with tuned per-method thresholds and universal authentic CSV
+    python3 src/stream_batch.py \
+        --dataset kshitizbhargava/deepfake-face-images \
+        --prefix "Final Dataset" \
+        --classes Fake --labels synthetic \
+        --label-detail stylegan_v1v2_portrait \
+        --methods shannon compression \
+        --thresholds 36 29 \
+        --resize 256 --name stylegan_v1v2 \
+        --pair-with results/features/FFHQ_shannon.csv \
+                    results/features/FFHQ_compression.csv
 
 Required args:
     --dataset       Kaggle dataset slug
     --classes       folder name(s) within --prefix, one per class
-    --labels        general label for each class (e.g. authentic synthetic manipulated)
+    --labels        general label for each class: authentic synthetic manipulated
     --prefix        path inside the zip containing the class folders
 
 Optional args:
-    --label_detail  descriptive sublabel per class (same order as --labels)
-                    e.g. --label_detail gan_faceswap authentic_portrait
+    --label-detail  descriptive sublabel per class (same order as --labels)
     --output        output folder or CSV path (default: results/features/)
     --methods       one or more of: shannon compression variance
                     each produces its own CSV; all share one zip download
-                    (default: compression)
-    --leaf_size     int overrides per-method defaults
+                    (default: shannon)
+    --leaf-size     int overrides per-method defaults
                     (compression=16, shannon=4, variance=4)
-    --resize        int resize every image to NxN before processing
-                    strongly recommended when mixing datasets
-    --threshold     float percentile pruning cutoff (default: off)
-    --max_images    int max images per class (default: 500)
-    --max_per_dataset  hard cap per (dataset, class) — prevents large
-                    datasets dominating when appending multiple sources
-    --workers       int parallel workers (default: 4)
+    --resize        int resize every image to NxN before processing (default: 256)
+    --threshold     float percentile pruning cutoff applied to all methods (default: off)
+    --thresholds    one float per method, same order as --methods
+                    e.g. --methods shannon compression --thresholds 36 29
+    --max-images    int max images per class (default: 500)
+    --max-per-dataset  hard cap per (dataset, class)
+    --chunk-size    int images per processing chunk, controls peak memory (default: 1000)
     --append        append to existing CSV instead of overwriting
-    --dry_run       show what would be processed without downloading
+    --dry-run       show what would be processed without downloading
     --explore       print folder structure and exit
     --depth         depth for --explore (default: 2)
+    --save-sample   int  save the first N images per class to
+                    data/sample/{name}_{label}/ for use with tune_thresholds.py
+    --pair-with     one CSV per method to prepend before extraction —
+                    ensures output always contains at least two classes
 """
 
 import argparse
@@ -91,7 +82,6 @@ import sys
 import time
 import traceback
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import requests
@@ -99,52 +89,97 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import config
+from config import setup_logging, get_logger
 from complexity import get_scorer
 from features import extract_features, FEATURE_FIELDS
 from quadtree import QuadTree
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
+log = get_logger(__name__)
+
+SUPPORTED_EXTENSIONS = config.SUPPORTED_EXTENSIONS
 KAGGLE_API_BASE      = "https://www.kaggle.com/api/v1"
-DEFAULT_LEAF_SIZES   = {"shannon": 4, "compression": 16, "variance": 4}
+DEFAULT_LEAF_SIZES   = config.DEFAULT_LEAF_SIZES
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Stream a Kaggle dataset zip through the quadtree pipeline — no disk storage."
+        description="Stream a Kaggle dataset through the quadtree complexity pipeline — no disk storage."
     )
-    parser.add_argument("--dataset", required=True)
-    parser.add_argument("--classes", nargs="+")
+    parser.add_argument("--dataset", required=True,
+                        help="Kaggle dataset slug e.g. xhlulu/140k-real-and-fake-faces")
+    parser.add_argument("--classes", nargs="+",
+                        help="Folder name(s) within --prefix, one per class")
     parser.add_argument("--labels", nargs="+",
-                        help="General label per class e.g. authentic synthetic manipulated")
-    parser.add_argument("--label_detail", nargs="+", default=None,
-                        help="Descriptive sublabel per class e.g. gan_faceswap real_portrait")
-    parser.add_argument("--prefix", default="")
-    parser.add_argument("--output", default="results/features/")
+                        help="General label per class: authentic synthetic manipulated")
+    parser.add_argument("--label-detail", nargs="+", default=None,
+                        help="Descriptive sublabel per class e.g. stylegan_v1_portrait real_portrait")
+    parser.add_argument("--prefix", default="",
+                        help="Path inside the zip containing the class folders")
+    parser.add_argument("--output", default=config.DIRS["features"],
+                        help=f"Output folder or CSV path (default: {config.DIRS['features']})")
     parser.add_argument("--methods", nargs="+",
-                        choices=["shannon", "compression", "variance"],
-                        default=["compression"],
+                        choices=config.METHODS,
+                        default=[config.DEFAULT_METHOD],
                         help="Scoring methods — each produces a separate CSV, "
-                             "all share one zip download. (default: compression)")
-    parser.add_argument("--leaf_size", type=int, default=None,
-                        help="Leaf size override (defaults: compression=16, shannon=4, variance=4)")
-    parser.add_argument("--resize", type=int, default=None, metavar="N",
-                        help="Resize every image to NxN before processing. "
-                             "Recommended when combining datasets with different resolutions.")
-    parser.add_argument("--threshold", type=float, default=None)
-    parser.add_argument("--max_images", type=int, default=500,
+                             "all share one zip download. (default: shannon)")
+    parser.add_argument("--leaf-size", type=int, default=None,
+                        help="Leaf size override in pixels "
+                             "(defaults: compression=16, shannon=4, variance=4)")
+    parser.add_argument("--resize", type=int, default=config.DEFAULT_RESIZE, metavar="N",
+                        help=f"Resize every image to NxN before processing "
+                             f"(default: {config.DEFAULT_RESIZE})")
+    parser.add_argument("--threshold", type=float, default=None,
+                        help="Percentile pruning cutoff applied to all methods. "
+                             "Use --thresholds for per-method values.")
+    parser.add_argument("--thresholds", nargs="+", type=float, default=None,
+                        metavar="T",
+                        help="Per-method pruning cutoffs, one per --methods entry "
+                             "(same order). Overrides --threshold. "
+                             "e.g. --methods shannon compression --thresholds 36 29")
+    parser.add_argument("--max-images", type=int, default=500,
                         help="Max images per class (default: 500)")
-    parser.add_argument("--max_per_dataset", type=int, default=None,
+    parser.add_argument("--max-per-dataset", type=int, default=None,
                         help="Hard cap per (dataset, class). Prevents large datasets "
                              "dominating when appending multiple sources. "
-                             "Defaults to --max_images if not set.")
-    parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--append", action="store_true")
-    parser.add_argument("--dry_run", action="store_true")
-    parser.add_argument("--explore", action="store_true")
+                             "Defaults to --max-images if not set.")
+    parser.add_argument("--append", action="store_true",
+                        help="Append to existing CSV instead of overwriting")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Show what would be processed without downloading")
+    parser.add_argument("--explore", action="store_true",
+                        help="Print folder structure and exit")
     parser.add_argument("--depth", type=int, default=2,
                         help="Directory depth for --explore (default: 2)")
+    parser.add_argument("--name", default=None,
+                        help="Dataset identifier prepended to output filename: "
+                             "{name}_{method}.csv  e.g. --name FFHQ "
+                             "→ results/features/FFHQ_shannon.csv. "
+                             "Auto-derived from --dataset slug if not set.")
+    parser.add_argument("--save-sample", type=int, default=None, metavar="N",
+                        help="Save the first N images per class to data/sample/{name}_{label}/. "
+                             "Use the saved folders with tune_thresholds.py to find optimal "
+                             "per-method thresholds without a separate download.")
+    parser.add_argument("--pair-with", nargs="+", default=None, metavar="CSV",
+                        help="One existing CSV per method (same order as --methods) to "
+                             "prepend into each output CSV before extraction. "
+                             "Ensures every output CSV contains at least two classes — "
+                             "pass the universal authentic CSV so single-class datasets "
+                             "are immediately ready for classify.py without a merge step.")
+    parser.add_argument("--progress", action="store_true", default=True,
+                        help="Show a rolling progress line (default: on)")
+    parser.add_argument("--chunk-size", type=int, default=1000, metavar="N",
+                        help="Process images in batches of N to limit peak memory usage. "
+                             "Each chunk is read from zip, processed, written to CSV, then "
+                             "freed before the next chunk is loaded. Lower this if you hit "
+                             "memory errors; raise it for slightly better throughput. "
+                             "(default: 1000)")
+    parser.add_argument("--no-progress", dest="progress", action="store_false",
+                        help="Suppress the progress line")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable DEBUG logging")
     return parser.parse_args()
 
 
@@ -162,9 +197,9 @@ def get_credentials():
             k = cfg.get("key",      "").strip()
             if u and k:
                 return u, k
-            print(f"Error: {path} is missing 'username' or 'key'.")
+            log.error(f"{path} is missing 'username' or 'key'.")
             sys.exit(1)
-    print("Error: kaggle.json not found.")
+    log.error("kaggle.json not found.")
     sys.exit(1)
 
 
@@ -183,19 +218,19 @@ def download_zip(session, dataset, verbose=True):
     url = f"{KAGGLE_API_BASE}/datasets/download/{owner}/{slug}"
 
     if verbose:
-        print(f"Downloading zip: {url}")
+        log.info("Downloading zip: %s", url)
 
     resp = session.get(url, stream=True, timeout=120, allow_redirects=True)
 
     if resp.status_code == 401:
-        print("Error: authentication failed.")
+        log.error("Authentication failed.")
         sys.exit(1)
     if resp.status_code == 403:
-        print(f"Error: access denied. Accept the dataset license at:")
-        print(f"  https://www.kaggle.com/datasets/{dataset}")
+        log.error("Access denied. Accept the dataset license at:")
+        log.error("  https://www.kaggle.com/datasets/%s", dataset)
         sys.exit(1)
     if resp.status_code == 404:
-        print(f"Error: dataset '{dataset}' not found.")
+        log.error("Dataset not found: %s", dataset)
         sys.exit(1)
     resp.raise_for_status()
 
@@ -213,9 +248,6 @@ def download_zip(session, dataset, verbose=True):
             print(f"  {pct:5.1f}%  {done >> 20} / {total >> 20} MB  "
                   f"({speed:.1f} MB/s)    ", end="\r")
 
-    if verbose:
-        print(f"  100.0%  {done >> 20} MB downloaded in {time.time()-t0:.1f}s          ")
-
     buf.seek(0)
     return buf
 
@@ -228,18 +260,17 @@ def explore_zip(zf, depth=2):
         "/".join(n.split("/")[:depth])
         for n in all_names if n.count("/") >= depth - 1
     ))
-    print(f"\nTotal files in zip: {len(all_names)}")
-    print(f"\nDirectory structure (first {depth} levels):")
+    log.info("Total files in zip: %d", len(all_names))
+    log.info("Directory structure (first %d levels):", depth)
     for d in dirs[:60]:
         members = [n for n in all_names if n.startswith(d + "/")]
         exts    = {os.path.splitext(n)[1].lower() for n in members}
-        print(f"  {d}/  ({len(members)} files  types: {', '.join(sorted(exts)) or 'none'})")
+        log.info("  %s/  (%d files  types: %s)", d, len(members), ", ".join(sorted(exts)) or "none")
     if len(dirs) > 60:
-        print(f"  ... and {len(dirs) - 60} more directories")
-    print()
-    print("Use these with --prefix and --classes:")
-    print("  --prefix  <the common parent directory>")
-    print("  --classes <the per-class subfolder names>")
+        log.info("  ... and %d more directories", len(dirs) - 60)
+    log.info("\nUse these with --prefix and --classes:")
+    log.info("  --prefix  <the common parent directory>")
+    log.info("  --classes <the per-class subfolder names>")
 
 
 # ── File selection ────────────────────────────────────────────────────────────
@@ -294,10 +325,13 @@ def resize_image(image_array, size):
 # ── Processing ────────────────────────────────────────────────────────────────
 
 def process_entry(entry_name, image_data, label, methods, leaf_sizes,
-                  threshold, resize=None, label_detail=None, dataset_source=""):
+                  thresholds, resize=None, label_detail=None, dataset_source=""):
     """
     Decode one image and run every requested scoring method in a single pass.
     The image bytes are decoded once; each method scores the same numpy array.
+
+    Args:
+        thresholds: dict mapping method -> threshold float (or None for no pruning)
 
     Returns:
         (filename, {method: ImageFeatures} | None, error_string | None)
@@ -315,7 +349,7 @@ def process_entry(entry_name, image_data, label, methods, leaf_sizes,
             qt     = QuadTree(
                 scorer=scorer,
                 leaf_size=leaf_sizes[method],
-                threshold=threshold,
+                threshold=thresholds.get(method),
             )
             root = qt.build(image_array, alpha=alpha, normalize=False)
             feat = extract_features(
@@ -336,22 +370,24 @@ def process_entry(entry_name, image_data, label, methods, leaf_sizes,
 
 # ── CSV helpers ───────────────────────────────────────────────────────────────
 
-def resolve_output_path(output_arg, method):
+def resolve_output_path(output_arg, method, name=None):
     """
     Resolve --output to a concrete .csv path for a given method.
 
-    Folder path  ->  {folder}/{method}.csv
-    Explicit .csv -> insert method before extension if not already there
-                     so multiple methods never overwrite each other
+    Filename format:
+        name given  ->  {name}_{method}.csv   e.g. ciplab_faces_shannon.csv
+        no name     ->  {method}.csv           (legacy behaviour)
+
+    Path rules:
+        Folder path   ->  {folder}/{name}_{method}.csv
+        Explicit .csv ->  used as-is (name/method assumed already embedded)
     """
+    stem = f"{name}_{method}" if name else method
     if output_arg.endswith(".csv"):
-        stem = output_arg[:-4]
-        if stem.endswith(method) or stem.endswith("_" + method):
-            return output_arg
-        return stem + "_" + method + ".csv"
+        return output_arg
     stripped = output_arg.rstrip("/").rstrip(os.sep)
     if output_arg.endswith("/") or output_arg.endswith(os.sep) or os.path.isdir(output_arg):
-        return os.path.join(stripped, method + ".csv")
+        return os.path.join(stripped, f"{stem}.csv")
     return output_arg
 
 
@@ -366,24 +402,117 @@ def append_to_csv(features, path, write_header):
             writer.writerow({k: row.get(k, "") for k in FEATURE_FIELDS})
 
 
+def slug_to_name(dataset_slug: str) -> str:
+    """
+    Convert a Kaggle dataset slug to a safe filename prefix.
+
+    ciplab/real-and-fake-face-detection  ->  ciplab_real_and_fake_face_detection
+    wish096/realvsfake-81k-by-wish       ->  wish096_realvsfake_81k_by_wish
+    """
+    import re
+    return re.sub(r"[^a-zA-Z0-9]+", "_", dataset_slug).strip("_")
+
+
+def save_sample_images(entry_data: list, label: str, name: str, n: int) -> str:
+    """
+    Write the first N raw image bytes to data/sample/{name}_{label}/.
+    Called once per class during processing — images are already in memory
+    from the zip read so no extra download is needed.
+
+    Returns the output directory path.
+    """
+    out_dir = os.path.join("data", "sample", f"{name}_{label}")
+    os.makedirs(out_dir, exist_ok=True)
+    saved = 0
+    for entry_name, data in entry_data[:n]:
+        filename = os.path.basename(entry_name)
+        out_path = os.path.join(out_dir, filename)
+        with open(out_path, "wb") as f:
+            f.write(data)
+        saved += 1
+    log.info("Sample: saved %d images → %s", saved, out_dir)
+    return out_dir
+
+
+def prepend_pair_csv(pair_path: str, output_path: str):
+    """
+    Copy all rows from pair_path into output_path as the first rows,
+    before any extracted features are written.
+
+    Called once per method at the start of a run so the output CSV
+    always contains at least two classes even if only one is extracted.
+    """
+    if not os.path.exists(pair_path):
+        log.error("--pair-with file not found: %s", pair_path)
+        sys.exit(1)
+
+    with open(pair_path, newline="") as f:
+        reader = csv.DictReader(f)
+        pair_fields = reader.fieldnames
+        rows = list(reader)
+
+    if not rows:
+        log.warning("--pair-with file is empty: %s", pair_path)
+        return 0
+
+    expected = set(FEATURE_FIELDS)
+    actual   = set(pair_fields or [])
+    if expected != actual:
+        missing = expected - actual
+        if missing:
+            log.warning("--pair-with %s is missing %d fields — check features.py version",
+                        pair_path, len(missing))
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=FEATURE_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in FEATURE_FIELDS})
+
+    return len(rows)
+
+
+def _process_entry_packed(args_tuple):
+    """
+    Thin wrapper around process_entry that accepts a flat tuple.
+    Keeps the call site in the processing loop clean.
+    """
+    entry_name, image_data, label, methods, leaf_sizes, thresholds, resize, label_detail, dataset_source = args_tuple
+    return process_entry(entry_name, image_data, label, methods, leaf_sizes,
+                         thresholds, resize=resize, label_detail=label_detail,
+                         dataset_source=dataset_source)
+
+
+def write_sidecar_json(csv_path: str, meta: dict) -> None:
+    """
+    Write a sidecar JSON file alongside a CSV with extraction metadata.
+    Stored at {csv_path}.json — e.g. FFHQ_shannon.csv → FFHQ_shannon.csv.json
+    """
+    sidecar_path = csv_path + ".json"
+    with open(sidecar_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    log.debug("Sidecar written: %s", sidecar_path)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     args = parse_args()
+    setup_logging(args.verbose)
 
     if not args.explore and (not args.classes or not args.labels):
-        print("Error: --classes and --labels are required unless --explore is used.")
+        log.error("--classes and --labels are required unless --explore is used.")
         sys.exit(1)
     if args.classes and args.labels and len(args.classes) != len(args.labels):
-        print("Error: --classes and --labels must have the same number of entries.")
+        log.error("--classes and --labels must have the same number of entries.")
         sys.exit(1)
     if args.label_detail and len(args.label_detail) != len(args.labels):
-        print("Error: --label_detail must have the same number of entries as --labels.")
+        log.error("--label-detail must have the same number of entries as --labels.")
         sys.exit(1)
 
     username, key = get_credentials()
     session       = make_session(username, key)
-    print(f"Kaggle authenticated as: {username}")
+    log.info("Kaggle authenticated as: %s", username)
 
     zip_buf = download_zip(session, args.dataset)
 
@@ -398,116 +527,174 @@ def main():
         leaf_sizes = {m: args.leaf_size or DEFAULT_LEAF_SIZES[m] for m in methods}
         max_cap    = args.max_per_dataset or args.max_images
 
-        output_paths  = {m: resolve_output_path(args.output, m) for m in methods}
-        write_headers = {
-            m: not (args.append and os.path.exists(output_paths[m]))
-            for m in methods
-        }
+        if args.thresholds is not None:
+            if len(args.thresholds) != len(methods):
+                log.error("--thresholds must have %d entries (one per method), got %d",
+                          len(methods), len(args.thresholds))
+                sys.exit(1)
+            thresholds = {m: t for m, t in zip(methods, args.thresholds)}
+        else:
+            thresholds = {m: args.threshold for m in methods}
+
+        if args.pair_with is not None:
+            if len(args.pair_with) != len(methods):
+                log.error("--pair-with must have %d entries (one per method), got %d",
+                          len(methods), len(args.pair_with))
+                sys.exit(1)
+            pair_csvs = {m: p for m, p in zip(methods, args.pair_with)}
+        else:
+            pair_csvs = {}
+
+        name         = args.name or slug_to_name(args.dataset)
+        output_paths = {m: resolve_output_path(args.output, m, name) for m in methods}
+
         for path in output_paths.values():
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
+        write_headers = {}
+        for m in methods:
+            if m in pair_csvs:
+                n_pair = prepend_pair_csv(pair_csvs[m], output_paths[m])
+                log.info("Paired %d rows from %s → %s", n_pair, pair_csvs[m], output_paths[m])
+                write_headers[m] = False
+            else:
+                write_headers[m] = not (args.append and os.path.exists(output_paths[m]))
+
+        sample_base   = config.DIRS["sample"] if args.save_sample else None
         label_details = args.label_detail or ([None] * len(args.labels))
 
-        print(f"\nStream Batch — in-memory zip, no local image storage")
-        print("─" * 56)
-        print(f"Dataset:        {args.dataset}")
-        print(f"Classes:        {list(zip(args.classes, args.labels))}")
-        if args.label_detail:
-            print(f"Label detail:   {args.label_detail}")
-        print(f"Max/class:      {args.max_images}  |  Max/dataset: {max_cap}")
-        print(f"Methods:        {methods}")
-        print(f"Leaf sizes:     {leaf_sizes}")
-        if args.resize:
-            print(f"Resize:         {args.resize}x{args.resize}px")
-        print(f"Threshold:      {args.threshold or 'off'}")
+        log.info("Stream Batch — in-memory zip, no local image storage")
+        log.info("Dataset:   %s  (name: %s)", args.dataset, name)
+        log.info("Classes:   %s", list(zip(args.classes, args.labels)))
+        log.info("Methods:   %s  leaf sizes: %s", methods, leaf_sizes)
+        log.info("Resize:    %spx", args.resize)
+        log.info("Thresholds: %s", thresholds)
+        if pair_csvs:
+            for m, p in pair_csvs.items():
+                log.info("Pair-with [%s]: %s", m, p)
         for m, p in output_paths.items():
-            print(f"Output [{m}]:  {p}")
-        print(f"Workers:        {args.workers}  |  Append: {args.append}\n")
+            log.info("Output [%s]: %s", m, p)
+        log.info("Processing:  sequential  chunk: %d  max/class: %d",
+                 args.chunk_size, args.max_images)
 
         total_processed = 0
         total_errors    = 0
 
         for class_folder, label, detail in zip(args.classes, args.labels, label_details):
-            print(f"\n{'─' * 56}")
-            print(f"Class: {label}  detail: {detail or '—'}  (folder: {class_folder})")
+            log.info("── Class: %s  (folder: %s)", label, class_folder)
 
             entries = select_class_entries(zf, args.prefix, class_folder, max_cap)
             if not entries:
-                print("  Warning: no images found. Run --explore to check paths.")
+                log.warning("No images found — run --explore to check paths.")
                 continue
 
-            print(f"  {len(entries)} images selected")
+            log.info("%d images selected", len(entries))
 
             if args.dry_run:
-                print("  [dry run] First 5:")
-                for e in entries[:5]:
-                    print(f"    {e}")
-                if len(entries) > 5:
-                    print(f"    ... and {len(entries) - 5} more")
+                log.info("[dry run] First 5: %s%s",
+                         entries[:5], f" ... and {len(entries)-5} more" if len(entries) > 5 else "")
                 continue
-
-            print("  Reading from zip...")
-            t_read     = time.time()
-            entry_data = [(name, zf.read(name)) for name in entries]
-            print(f"  Read {len(entry_data)} images in {time.time()-t_read:.1f}s")
 
             class_features = {m: [] for m in methods}
             class_errors   = 0
             t0             = time.time()
-            n_total        = len(entry_data)
+            n_total        = len(entries)
+            done           = 0
+            chunk_size     = args.chunk_size
 
-            def _task(item):
-                name, data = item
-                return process_entry(
-                    name, data, label, methods, leaf_sizes,
-                    args.threshold,
-                    resize=args.resize,
-                    label_detail=detail,
-                    dataset_source=args.dataset,
-                )
+            log.info("Processing %d images in chunks of %d", n_total, chunk_size)
 
-            with ThreadPoolExecutor(max_workers=args.workers) as pool:
-                futures = {pool.submit(_task, item): item[0] for item in entry_data}
-                done    = 0
-                for future in as_completed(futures):
+            for chunk_start in range(0, n_total, chunk_size):
+                chunk_entries = entries[chunk_start:chunk_start + chunk_size]
+
+                # Read only this chunk from zip — previous chunk is already freed
+                chunk_data = [(ep, zf.read(ep)) for ep in chunk_entries]
+
+                # Save samples from first chunk only
+                if sample_base and args.save_sample and chunk_start == 0:
+                    save_sample_images(chunk_data, label, name, args.save_sample)
+
+                chunk_features = {m: [] for m in methods}
+
+                for ep, data in chunk_data:
                     done += 1
-                    filename, results, err = future.result()
+                    filename, results, err = _process_entry_packed(
+                        (ep, data, label, methods, leaf_sizes, thresholds,
+                         args.resize, detail, args.dataset)
+                    )
                     if err:
                         class_errors += 1
-                        print(f"  [{done}/{n_total}] ERROR {filename}: "
-                              f"{err.strip().splitlines()[-1]}")
+                        log.error("%-40s %s", filename, err.strip().splitlines()[-1])
                     else:
-                        first = results[methods[0]]
-                        print(
-                            f"  [{done}/{n_total}] {filename}  "
-                            f"mean: {first.mean_complexity:.4f}  "
-                            f"std: {first.std_complexity:.4f}  "
-                            f"bd: {first.mean_boundary_delta:.4f}"
-                        )
                         for m in methods:
-                            class_features[m].append(results[m])
+                            chunk_features[m].append(results[m])
+                    if args.progress and n_total:
+                        pct  = done / n_total * 100
+                        rate = done / max(time.time() - t0, 0.001)
+                        print(f"  {pct:5.1f}%  {done} / {n_total}  ({rate:.0f} img/s)    ",
+                              end="\r")
 
-            for m in methods:
-                feats = class_features[m]
-                if feats:
-                    append_to_csv(feats, output_paths[m], write_header=write_headers[m])
-                    write_headers[m] = False
+                # Flush chunk to CSV and free memory before next chunk
+                for m in methods:
+                    feats = chunk_features[m]
+                    if feats:
+                        append_to_csv(feats, output_paths[m], write_header=write_headers[m])
+                        write_headers[m] = False
+                        class_features[m].extend(feats)
+
+                del chunk_data, chunk_features  # free before next chunk
+
+            print()  # newline after final \r
 
             n_ok    = len(class_features[methods[0]])
             elapsed = time.time() - t0
-            print(f"\n  '{label}': {n_ok} processed, {class_errors} errors  ({elapsed:.1f}s)")
+            log.info("'%s': %d processed, %d errors  (%.1fs)", label, n_ok, class_errors, elapsed)
             total_processed += n_ok
             total_errors    += class_errors
 
-    print(f"\n{'─' * 56}")
+        # ── Sidecar JSON ──────────────────────────────────────────────────────
+        import datetime
+        meta_base = {
+            "dataset":    args.dataset,
+            "name":       name,
+            "classes":    list(zip(args.classes, args.labels)),
+            "resize":     args.resize,
+            "thresholds": thresholds,
+            "leaf_sizes": leaf_sizes,
+            "max_images": args.max_images,
+            "pair_with":  pair_csvs,
+            "timestamp":  datetime.datetime.now().isoformat(timespec="seconds"),
+            "total":      total_processed,
+            "errors":     total_errors,
+        }
+        for m, path in output_paths.items():
+            write_sidecar_json(path, {**meta_base, "method": m, "leaf_size": leaf_sizes[m],
+                                      "threshold": thresholds.get(m)})
+
     if args.dry_run:
-        print("Dry run complete — nothing processed.")
+        log.info("Dry run complete — nothing processed.")
     else:
-        print(f"Done.  {total_processed} processed, {total_errors} errors.")
-        if total_processed > 0:
-            for m, p in output_paths.items():
-                print(f"  [{m}] -> {p}")
-    print('\a')
+        log.info("Done.  %d processed, %d errors.", total_processed, total_errors)
+        for m, p in output_paths.items():
+            log.info("  [%s] → %s", m, p)
+
+        if sample_base and args.save_sample:
+            label_dirs = " ".join(
+                os.path.join("data", "sample", f"{name}_{lbl}") for lbl in args.labels
+            )
+            labels_str = " ".join(args.labels)
+            log.info("\nSamples saved to: data/sample/%s_{label}/", name)
+            log.info("Run tune_thresholds.py to find optimal thresholds:")
+            for m in methods:
+                ls = leaf_sizes[m]
+                log.info(
+                    "\n  python3 src/tune_thresholds.py \\\n"
+                    "      --input %s \\\n"
+                    "      --labels %s \\\n"
+                    "      --method %s --leaf-size %d \\\n"
+                    "      --max-images %d",
+                    label_dirs, labels_str, m, ls, args.save_sample
+                )
 
 
 if __name__ == "__main__":

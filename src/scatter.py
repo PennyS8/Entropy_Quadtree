@@ -49,10 +49,14 @@ LABEL_COLORS = {
     "":              (150, 150, 150, 220),
 }
 
-NUMERIC_FEATURES = [f for f in FEATURE_FIELDS if f not in ("filename", "label", "leaf_count")]
+NUMERIC_FEATURES = [f for f in FEATURE_FIELDS if f not in (
+    "filename", "label", "label_detail", "is_real", "dataset_source"
+)]
 
-# Always exclude — zero or near-zero variance across all images regardless of class
-DEAD = {"max_complexity", "mean_leaf_area", "std_leaf_area", "mean_depth", "std_depth", "leaf_count"}
+# Always exclude from auto-scatter — zero variance regardless of class.
+# Note: max_complexity, mean_leaf_area, std_leaf_area, leaf_count, mean_depth,
+# std_depth have already been removed from FEATURE_FIELDS entirely.
+DEAD = set()  # no remaining dead features — exclusions handled upstream
 
 
 def parse_args():

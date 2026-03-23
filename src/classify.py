@@ -23,15 +23,39 @@ Usage:
     python3 src/classify.py results/features/compression.csv --prune-features 0.0
     python3 src/classify.py results/features/compression.csv --prune-features 0.0005
 
+    # Save the best classifier for use with predict.py
+    python3 src/classify.py results/features/ciplab_faces_shannon.csv \\
+        --fast --balance --save-model ciplab_faces_shannon \\
+        --method shannon --leaf-size 4
+    # → results/models/ciplab_faces_shannon.joblib
+
+    # Cross-dataset generalization test: train on ciplab, test on wish096
+    python3 src/classify.py results/features/ciplab_faces_shannon.csv \\
+        --test-csv results/features/wish096_faces_shannon.csv --fast --balance
+
+--test-csv PATH
+    Cross-dataset evaluation mode. Trains on the entire CSV (no random split),
+    then tests on a completely separate dataset CSV. Both CSVs must share the
+    same feature columns (same --method and --leaf_size).
+
+    Output: results/classify/{train_stem}_vs_{test_stem}.txt
+
+    If accuracy is much lower than within-dataset accuracy, the classifier is
+    memorizing dataset-specific patterns (likely the spatial grid cells) rather
+    than learning general AI-detection features.
+
 --prune-features THRESHOLD
     Fits a Random Forest on the full feature set, computes permutation
     importance, then discards any feature whose mean permutation importance
     is below THRESHOLD (default 0.0 drops only features that actively hurt
     accuracy). The remaining classifiers then train on the pruned set.
+    In cross-dataset mode, pruning uses an internal 80/20 split of the train
+    set so the test CSV is never seen during feature selection.
 
 Output:
     Console report: accuracy, precision, recall, F1, confusion matrix
     results/classify/{csv_stem}.txt  (e.g. results/classify/compression.txt)
+    results/classify/{train_stem}_vs_{test_stem}.txt  (cross-dataset mode)
 """
 
 import argparse
@@ -116,6 +140,37 @@ def parse_args():
                        "THRESHOLD before running the main classifiers. "
                        "Use 0.0 to drop only features that actively hurt accuracy; "
                        "higher values (e.g. 0.0005) prune more aggressively.")
+    parser.add_argument("--test-csv", default=None, metavar="PATH",
+                       help="Cross-dataset evaluation: train on the full CSV, test on this "
+                       "separate CSV. Bypasses the random train/test split entirely. "
+                       "Both CSVs must share the same feature columns (same method, same "
+                       "leaf size). --test-size and --balance are ignored for the test set. "
+                       "Output: results/classify/{train_stem}_vs_{test_stem}.txt")
+    parser.add_argument("--save-model", default=None, metavar="NAME",
+                       help="After training, serialize the best classifier to "
+                       "results/models/{NAME}.joblib. The bundle includes the fitted "
+                       "classifier, scaler, feature columns, method, and leaf size — "
+                       "everything predict.py needs to run on new images. "
+                       "Requires --method and --leaf-size to be set so the quadtree "
+                       "can be rebuilt identically at inference time.")
+    parser.add_argument("--method", default=None,
+                       choices=["shannon", "compression", "variance"],
+                       help="Scoring method used to produce the CSV. Required when "
+                       "using --save-model so the method is embedded in the model bundle.")
+    parser.add_argument("--leaf-size", type=int, default=None, metavar="N",
+                       help="Leaf size used to produce the CSV. Required when using "
+                       "--save-model so the quadtree can be rebuilt identically at "
+                       "inference time.")
+    parser.add_argument("--resize", type=int, default=None, metavar="N",
+                       help="Resize applied when producing the CSV (NxN pixels). "
+                       "Required when using --save-model if --resize was passed to "
+                       "batch.py or stream_batch.py, so predict.py can apply the "
+                       "same resize before feature extraction.")
+    parser.add_argument("--seed", type=int, default=42,
+                       help="Random seed for train/test split, classifiers, and "
+                       "permutation importance. Set to any integer for a different "
+                       "reproducible run, or pass different values to measure variance. "
+                       "(default: 42)")
     return parser.parse_args()
 
 
@@ -152,7 +207,7 @@ def detect_outliers(x: np.ndarray, feature_cols: list):
     return outlier_mask, "\n".join(lines)
 
 
-def load_data(csv_path: str, feature_cols: list, balance: bool):
+def load_data(csv_path: str, feature_cols: list, balance: bool, seed: int = 42):
     rows = load_csv(csv_path)
 
     x, y, filenames = [], [], []
@@ -240,8 +295,8 @@ def evaluate(name, clf,
                 files = [fn_test[i] for i in range(len(fn_test)) if mask[i]]
                 if files:
                     print(f"  [{name}] true={true_label} predicted={pred_label} ({len(files)} files):")
-                    # for fn in files:
-                    #     print(f"    {fn}")
+                    for fn in files:
+                        print(f"    {fn}")
 
     lines = []
     lines.append(f"\n{'='*60}")
@@ -272,7 +327,7 @@ def evaluate(name, clf,
     # Permutation importance (opt-in, RF and GB only)
     if show_permutation_importance and hasattr(clf, "feature_importances_"):
         lines.append(f"\n  Permutation importances (mean decrease in accuracy, 10 repeats):")
-        result = permutation_importance(clf, x_test, y_test, n_repeats=10, random_state=42, n_jobs=-1)
+        result = permutation_importance(clf, x_test, y_test, n_repeats=10, random_state=42, n_jobs=-1)  # seed fixed for consistency
         perm_sorted = sorted(
             zip(feature_cols, result.importances_mean, result.importances_std),
             key=lambda x: -x[1]
@@ -321,11 +376,11 @@ def prune_features(
     Use threshold=0.0 to drop only features that actively hurt accuracy.
     """
     print(f"Pruning features (threshold={threshold})...")
-    probe = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    probe = RandomForestClassifier(n_estimators=100, random_state=seed, n_jobs=-1)
     probe.fit(x_train, y_train)
     result = permutation_importance(
         probe, x_test, y_test,
-        n_repeats=n_repeats, random_state=42, n_jobs=-1
+        n_repeats=n_repeats, random_state=seed, n_jobs=-1
     )
 
     pairs = sorted(
@@ -356,6 +411,67 @@ def prune_features(
     return kept_ordered, dropped_cols, "\n".join(lines)
 
 
+def save_model(
+    clf,
+    clf_name: str,
+    scaler,
+    feature_cols: list,
+    classes: list,
+    method: str,
+    leaf_size: int,
+    resize: int,
+    trained_on: str,
+    accuracy: float,
+    name: str,
+    seed: int = 42,
+) -> str:
+    """
+    Serialize a fitted classifier + everything predict.py needs to a .joblib bundle.
+
+    Bundle schema:
+        clf           — fitted sklearn classifier
+        clf_name      — human-readable classifier name (e.g. "Random Forest")
+        scaler        — fitted StandardScaler (None for tree-based classifiers)
+        feature_cols  — ordered list of feature column names the model expects
+        classes       — list of class labels in classifier order
+        method        — quadtree scoring method ("shannon"/"compression"/"variance")
+        leaf_size     — quadtree leaf size in pixels
+        resize        — image resize applied before feature extraction (None = no resize)
+        trained_on    — path to the training CSV
+        accuracy      — test-set accuracy at save time
+        saved_at      — ISO timestamp
+
+    Args:
+        name: output stem — saved to results/models/{name}.joblib
+    
+    Returns:
+        Absolute path of the saved file.
+    """
+    import datetime
+    needs_scaling = not hasattr(clf, "feature_importances_")  # True for LR / SVM
+
+    bundle = {
+        "clf":          clf,
+        "clf_name":     clf_name,
+        "scaler":       scaler if needs_scaling else None,
+        "feature_cols": feature_cols,
+        "classes":      list(classes),
+        "method":       method,
+        "leaf_size":    leaf_size,
+        "resize":       resize,
+        "seed":         seed,
+        "trained_on":   trained_on,
+        "accuracy":     accuracy,
+        "saved_at":     datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+
+    out_dir = os.path.join("results", "models")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{name}.joblib")
+    joblib.dump(bundle, out_path)
+    return out_path
+
+
 def main():
     args = parse_args()
 
@@ -366,6 +482,16 @@ def main():
     if not os.path.exists(args.csv):
         print(f"Error: file not found: {args.csv}")
         sys.exit(1)
+
+    if args.save_model:
+        if not args.method:
+            print("Error: --method is required when using --save-model "
+                  "(it is embedded in the bundle so predict.py can rebuild the quadtree).")
+            sys.exit(1)
+        if not args.leaf_size:
+            print("Error: --leaf-size is required when using --save-model "
+                  "(it is embedded in the bundle so predict.py can rebuild the quadtree).")
+            sys.exit(1)
 
     print(f"Loading {args.csv}...")
 
@@ -392,9 +518,50 @@ def main():
     print(f"Features: {visible}" + (f" + {tg_count} tree_grid spatial cells" if tg_count else ""))
     print(f"Total samples: {len(y)}")
 
-    x_train, x_test, y_train, y_test, fn_train, fn_test = train_test_split(
-        x, y, filenames, test_size=args.test_size, random_state=42, stratify=y
-    )
+    # ── Split strategy ────────────────────────────────────────────────────────
+    if args.test_csv:
+        # Cross-dataset mode: train on entire CSV, test on a separate dataset.
+        # Validates that both CSVs share the same feature columns before loading.
+        if not os.path.exists(args.test_csv):
+            print(f"Error: --test-csv file not found: {args.test_csv}")
+            sys.exit(1)
+
+        import csv as _csv
+        with open(args.test_csv, newline="") as _f:
+            test_header = set(next(_csv.reader(_f)))
+        missing = [c for c in feature_cols_arg if c not in test_header]
+        if missing:
+            print(f"Error: {len(missing)} feature column(s) in train CSV are missing from "
+                  f"--test-csv. Make sure both were produced with the same method and "
+                  f"leaf_size.\nMissing (first 5): {missing[:5]}")
+            sys.exit(1)
+
+        print(f"\nCross-dataset mode:")
+        print(f"  Train: {args.csv}  ({len(y)} samples)")
+        print(f"  Test:  {args.test_csv}")
+        x_test_raw, y_test, fn_test, test_outlier_report = load_data(
+            args.test_csv, feature_cols_arg, balance=False, seed=args.seed
+        )
+        test_classes, test_counts = np.unique(y_test, return_counts=True)
+        print(f"  Test classes: {dict(zip(test_classes, test_counts))}")
+
+        x_train, y_train, fn_train = x, y, filenames
+        x_test = x_test_raw
+
+        cross_dataset = True
+        split_desc = (f"Train: {args.csv}\n"
+                      f"Test (cross-dataset): {args.test_csv}")
+    else:
+        # Standard mode: random within-dataset split
+        if args.test_csv is None and args.test_size >= 1.0:
+            print("Error: --test-size must be < 1.0")
+            sys.exit(1)
+        x_train, x_test, y_train, y_test, fn_train, fn_test = train_test_split(
+            x, y, filenames, test_size=args.test_size, random_state=args.seed, stratify=y
+        )
+        cross_dataset = False
+        split_desc = f"Train/test split: {1-args.test_size:.0%} / {args.test_size:.0%}"
+        test_outlier_report = ""
 
     # Scale features — required for LR and SVM, harmless for tree methods
     scaler = StandardScaler()
@@ -406,9 +573,18 @@ def main():
     feature_cols = list(feature_cols_arg)
 
     if args.prune_features is not None:
+        # In cross-dataset mode, use an internal split of the train set for
+        # the probe so the test CSV remains completely unseen during pruning.
+        if cross_dataset:
+            x_pr_tr, x_pr_te, y_pr_tr, y_pr_te = train_test_split(
+                x_train, y_train, test_size=0.2, random_state=args.seed, stratify=y_train
+            )
+        else:
+            x_pr_tr, x_pr_te, y_pr_tr, y_pr_te = x_train, x_test, y_train, y_test
+
         kept, dropped, prune_report = prune_features(
-            x_train, x_test, y_train, y_test,
-            feature_cols, threshold=args.prune_features
+            x_pr_tr, x_pr_te, y_pr_tr, y_pr_te,
+            feature_cols, threshold=args.prune_features, seed=args.seed
         )
         print(prune_report)
         if not kept:
@@ -430,23 +606,28 @@ def main():
     print(f"Features ({len(feature_cols)}): {visible_cols}{suffix}")
     print(f"\nTrain: {len(y_train)}  Test: {len(y_test)}\n")
 
-    classifiers = CLASSIFIERS_FAST if args.fast else CLASSIFIERS_FULL
+    classifiers = make_classifiers_fast(args.seed) if args.fast else make_classifiers(args.seed)
+    import datetime
     mode = "fast" if args.fast else "full"
+    mode_str = f"{mode} mode, cross-dataset" if cross_dataset else f"{mode} mode"
 
     all_lines = [
-        f"Classification Report ({mode} mode)",
-        f"CSV: {args.csv}",
+        f"Classification Report ({mode_str})",
+        f"Timestamp: {datetime.datetime.now().isoformat(timespec='seconds')}",
+        f"Seed:      {args.seed}",
+        split_desc,
         f"Features ({len(feature_cols)}): {feature_cols}",
-        f"Train/test split: {1-args.test_size:.0%} / {args.test_size:.0%}",
         f"Balanced: {args.balance}",
         "",
         outlier_report,
     ]
+    if cross_dataset and test_outlier_report:
+        all_lines.append(f"\nTest set outlier detection:\n{test_outlier_report}")
     if prune_report:
         all_lines.append(prune_report)
 
     results = []
-    cv = StratifiedKFold(n_splits=args.cv, shuffle=True, random_state=42)
+    cv = StratifiedKFold(n_splits=args.cv, shuffle=True, random_state=args.seed)
 
     for name, clf in classifiers.items():
         print(f"Training {name}...", end=" ", flush=True)
@@ -469,6 +650,32 @@ def main():
     for name, acc in sorted(results, key=lambda x: -x[1]):
         bar = "█" * int(acc * 40)
         all_lines.append(f"  {name:<25} {acc:.4f}  {bar}")
+
+    # --- Save best model --------------------------------------------------
+    if args.save_model:
+        best_name, best_acc = max(results, key=lambda x: x[1])
+        best_clf = classifiers[best_name]
+        model_path = save_model(
+            clf=best_clf,
+            clf_name=best_name,
+            scaler=scaler,
+            feature_cols=feature_cols,
+            classes=sorted(set(y_train)),
+            method=args.method,
+            leaf_size=args.leaf_size,
+            resize=args.resize,
+            trained_on=", ".join(args.csv),
+            accuracy=best_acc,
+            name=args.save_model,
+            seed=args.seed,
+        )
+        model_line = (f"\nModel saved: {model_path}"
+                      f"  [{best_name}, acc={best_acc:.4f}]"
+                      f"  method={args.method}  leaf_size={args.leaf_size}"
+                      f"  resize={args.resize or 'off'}")
+        all_lines.append(model_line)
+        print(model_line)
+    # ----------------------------------------------------------------------
     
     report_text = "\n".join(all_lines)
     print(report_text)
@@ -476,10 +683,12 @@ def main():
     if args.output:
         out_path = args.output
     else:
-        # Derive name from the CSV stem and write into results/classify/
-        # e.g. results/features/compression_spatial_map.csv -> results/classify/compression_spatial_map.txt
-        csv_stem = os.path.splitext(os.path.basename(args.csv))[0]
-        out_path = os.path.join("results", "classify", f"{csv_stem}.txt")
+        train_stem = os.path.splitext(os.path.basename(args.csv))[0]
+        if cross_dataset:
+            test_stem = os.path.splitext(os.path.basename(args.test_csv))[0]
+            out_path = os.path.join("results", "classify", f"{train_stem}_vs_{test_stem}.txt")
+        else:
+            out_path = os.path.join("results", "classify", f"{train_stem}.txt")
     
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     

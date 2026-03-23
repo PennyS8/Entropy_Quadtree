@@ -1,33 +1,32 @@
 """
 depth_distribution.py
 
-Analyse the empirical depth distribution of quadtrees across a dataset by
-sampling images and building trees, then reporting the actual max depth
-reached per image.
+Analyse the empirical depth distribution of complexity quadtrees across a dataset
+by sampling images, building trees, and reporting the max depth reached per image.
 
-This is used to choose a target depth for the tree-grid spatial map — pick
-a depth that every image in the dataset reliably reaches so no cells need
-filling by parent propagation.
+Part of the Quadtree Complexity Analysis for Image Forensics pipeline.
+Used to choose a target depth for the tree-grid spatial feature map — pick
+a depth that every image reliably reaches so no cells require parent propagation.
 
 Usage:
     # Sample 500 images from each of two folders
     python3 src/depth_distribution.py \\
-        --input /path/to/Real /path/to/Fake \\
-        --labels real ai \\
+        --input /path/to/real /path/to/fake \\
+        --labels authentic synthetic \\
         --method compression \\
         --max_images 500
 
     # Use a specific threshold and leaf size
     python3 src/depth_distribution.py \\
-        --input /path/to/Real /path/to/Fake \\
-        --labels real ai \\
-        --method compression --threshold 10 --leaf_size 16 \\
+        --input /path/to/real /path/to/fake \\
+        --labels authentic synthetic \\
+        --method compression --threshold 29 --leaf_size 16 \\
         --max_images 1000
 
     # Save depth distribution plots (default output: results/depth/)
     python3 src/depth_distribution.py \\
-        --input /path/to/Real /path/to/Fake \\
-        --labels real ai \\
+        --input /path/to/real /path/to/fake \\
+        --labels authentic synthetic \\
         --output results/depth/
 
 Output:
@@ -53,7 +52,7 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Analyse quadtree depth distribution across a dataset.")
+    parser = argparse.ArgumentParser(description="Analyse quadtree complexity depth distribution for spatial feature calibration.")
     parser.add_argument("--input", nargs="+", required=True,
                         help="One or more input folders of images")
     parser.add_argument("--labels", nargs="+", required=True,

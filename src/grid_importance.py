@@ -46,6 +46,7 @@ from PIL import Image, ImageDraw, ImageFont
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from features import load_csv, FEATURE_FIELDS
 
+# Kaggle API used only when --kaggle-prefix is passed to fetch a reference image
 KAGGLE_API_BASE = "https://www.kaggle.com/api/v1"
 
 

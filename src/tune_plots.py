@@ -48,25 +48,37 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Plot threshold tuning results.")
     parser.add_argument(
         "--input", nargs="+", default=None,
-        help="One or more tuning CSVs. If omitted, reads "
-             "results/tuning/{shannon,compression,variance}.csv automatically."
+        help="One or more tuning CSVs. If omitted, auto-discovers all CSVs "
+             "under results/tuning/ (or the folder given by --folder)."
+    )
+    parser.add_argument(
+        "--folder", default=None, metavar="DIR",
+        help="Restrict auto-discovery to a specific subfolder, e.g. "
+             "results/tuning/deepfacelab/ — plots only that dataset's methods. "
+             "Ignored when --input is provided explicitly."
     )
     parser.add_argument(
         "--output", default=None,
-        help="Output folder for plots. Default: results/tuning/"
+        help="Output folder for plots. Default: same folder as --folder if given, "
+             "otherwise results/tuning/"
     )
     return parser.parse_args()
 
 
 def label_from_path(path: str) -> str:
     """
-    Derive a short legend label from a CSV filename.
+    Derive a short legend label from a CSV path.
 
-    compression.csv              -> compression
-    compression_spatial_map.csv  -> compression_spatial_map
-    anything_else.csv            -> anything_else
+    results/tuning/stylegan_v1/shannon.csv   -> stylegan_v1/shannon
+    results/tuning/deepfacelab/compression.csv -> deepfacelab/compression
+    results/tuning/shannon.csv               -> shannon  (legacy flat)
     """
-    return os.path.splitext(os.path.basename(path))[0]
+    stem   = os.path.splitext(os.path.basename(path))[0]
+    parent = os.path.basename(os.path.dirname(path))
+    # If parent is the tuning root itself, just use the stem (legacy)
+    if parent == DEFAULT_INPUT_DIR.rstrip("/").split("/")[-1] or parent == "tuning":
+        return stem
+    return f"{parent}/{stem}"
 
 
 def load_csv(path: str) -> list:
@@ -208,13 +220,20 @@ def main():
     if args.input:
         paths = args.input
     else:
-        paths = [
-            os.path.join(DEFAULT_INPUT_DIR, f"{m}.csv")
-            for m in DEFAULT_METHODS
-        ]
-        paths = [p for p in paths if os.path.exists(p)]
+        # If --folder given, restrict discovery to that directory
+        search_root = args.folder.rstrip("/") if args.folder else DEFAULT_INPUT_DIR
+        import glob
+        paths = sorted(glob.glob(
+            os.path.join(search_root, "**", "*.csv"), recursive=True
+        ))
+        # Also check legacy flat location: results/tuning/{method}.csv
+        if not args.folder:
+            for m in DEFAULT_METHODS:
+                flat = os.path.join(DEFAULT_INPUT_DIR, f"{m}.csv")
+                if os.path.exists(flat) and flat not in paths:
+                    paths.append(flat)
         if not paths:
-            print(f"No default CSVs found in {DEFAULT_INPUT_DIR}. Use --input to specify files.")
+            print(f"No CSVs found under {search_root}/. Use --input to specify files.")
             return
     
     # Load datasets
@@ -232,9 +251,11 @@ def main():
         print("No data loaded — nothing to plot.")
         return
 
-    # Resolve output directory
+    # Resolve output directory — default to --folder if given, else tuning root
     if args.output:
         output_dir = args.output.rstrip("/")
+    elif args.folder:
+        output_dir = args.folder.rstrip("/")
     else:
         output_dir = DEFAULT_INPUT_DIR
     os.makedirs(output_dir, exist_ok=True)

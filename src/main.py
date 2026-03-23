@@ -1,15 +1,15 @@
 """
 main.py
 
-CLI entry point for the entropy visualizer. Processes a single image and
-saves an overlay PNG showing the quadtree complexity map.
+CLI entry point for the Quadtree Complexity Analysis for Image Forensics tool.
+Processes a single image and saves an overlay PNG showing the quadtree complexity map.
 
 Usage:
     python3 src/main.py photo.jpg
     python3 src/main.py photo.jpg --method compression
-    python3 src/main.py photo.jpg --method shannon --leaf-size 4
+    python3 src/main.py photo.jpg --method shannon --leaf_size 4
     python3 src/main.py photo.jpg --method compression --threshold 0.05
-    python3 src/main.py photo.jpg -o result.png --no-legend --no-borders
+    python3 src/main.py photo.jpg -o result.png --legend --borders
 
 Optional args:
     --method      shannon|compression|variance (default: shannon)
@@ -20,7 +20,7 @@ Optional args:
     --threshold   float                 (default: off)
     --alpha       int                   (default: 120)
     --borders                           show quadrant border lines
-    --legend                            show the colorbar legend
+    --legend                            append a colorbar legend below the image
 """
 
 import argparse
@@ -39,13 +39,13 @@ from visualizer import save_result
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Visualize image complexity as a quadtree display"
+        description="Quadtree Complexity Analysis for Image Forensics — visualize image complexity as a quadtree overlay"
     )
     parser.add_argument("image", help="Path to input image file")
     parser.add_argument(
         "-o", "--output",
         default=None,
-        help="Output file path  (default: <input>_entropy.png)"
+        help="Output file path  (default: <input>_complexity.png)"
     )
     parser.add_argument(
         "--method",
@@ -140,18 +140,18 @@ def main():
     )
     
     # Build tree
-    print("Building quadtree...")
+    print("Building complexity quadtree...")
     root = qt.build(image_array, alpha=alpha, normalize=True)
     
     # Print stats
     stats = tree_stats(root)
-    print("\nQuadtree Stats (subject only):")
+    print("\nComplexity Stats (subject nodes only):")
     for k, v in stats.items():
         print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")
     print()
     
     # Render and save
-    output_path = args.output or args.image.rsplit(".", 1)[0] + "_entropy.png"
+    output_path = args.output or args.image.rsplit(".", 1)[0] + "_complexity.png"
     save_result(
         image = image_array,
         root = root,

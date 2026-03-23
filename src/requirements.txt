@@ -1,0 +1,16 @@
+# requirements.txt: pinned versions for reproducible environments
+# Generated from the development environment.
+# 
+# Install:          pip install -r requirements.txt
+# Install (dev):    pip install -e ".[dev]"
+# 
+# To update pins after upgrading packages
+#   pip freeze | grep -E "Pillow|numpy|scikit|joblib|requests|matplotlib"
+> requirements.txt
+
+Pillow==12.1.1
+numpy==2.4.2
+scikit-learn==1.0.0
+joblib==1.5.3
+requests==2.32.5
+matplotlib==3.10.8
